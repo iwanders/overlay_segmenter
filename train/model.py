@@ -72,7 +72,10 @@ class Unet(nn.Module):
 
         # And then we have a conv 1x1, why does this have 2 channels out??
         self.last_conv = nn.Conv2d(
-            64, out_channels=channels_out, kernel_size=1, padding=1
+            64,
+            out_channels=channels_out,
+            kernel_size=1,  # , padding=1
+            # Probably don't want that padding, since it makes the output image a different size than the input image.
         )
 
     def forward(self, x):
