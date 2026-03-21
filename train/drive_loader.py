@@ -49,16 +49,27 @@ def load_image(d):
 
 # Assuming mask is a tensor of shape (H, W)
 def target_preprocess(mask):
-    # return mask
-    one_hot_mask = F.one_hot(mask.to(torch.int64), num_classes=2)
+    # For probabilities
+    ONE_HOT = True
+    # For class labels
+    INTEGER_LABEL = True
+    #
     # one_hot_reshaped = one_hot_mask.reshape([2, 512, 512]).to(torch.float)
     # print(one_hot_reshaped)
-    reshaped = (
-        one_hot_mask.permute(*torch.arange(one_hot_mask.ndim - 1, -1, -1))
-        .squeeze()
-        .to(torch.float)
-    )
-    return reshaped
+    if INTEGER_LABEL:
+        v = mask.to(torch.int64).squeeze()
+        # print(v.shape, "min", v.min(), "max", v.max())
+        return v
+
+    if ONE_HOT:
+        one_hot_mask = F.one_hot(mask.to(torch.int64), num_classes=2)
+        reshaped = (
+            one_hot_mask.permute(*torch.arange(one_hot_mask.ndim - 1, -1, -1))
+            .squeeze()
+            .to(torch.float)
+        )
+        print(reshaped.shape)
+        return reshaped
 
 
 def load_drive_dataset(device="cpu"):

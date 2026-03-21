@@ -22,8 +22,8 @@ print(f"Using device: {device}")
 
 train, test = load_drive_dataset(device=device)
 
-training_set = [(a.image, a.manual1) for a in train]
-validation_set = [(a.image, a.manual1) for a in test]
+training_set = [(a.image, a.manual1) for a in train][0:3]
+validation_set = [(a.image, a.manual1) for a in train + test][0:3]
 
 
 # Create data loaders for our datasets; shuffle for training, not for validation
@@ -38,14 +38,14 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 # writer = SummaryWriter("runs/fashion_trainer_{}".format(timestamp))
 epoch_number = 0
 
-EPOCHS = 10
+EPOCHS = 100
 
 best_vloss = 1_000_000.0
 
 model = Unet(channels_in=3, channels_out=2)
 model.to(device)
 
-optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
 
 loss_fn = torch.nn.CrossEntropyLoss()
 
@@ -66,7 +66,8 @@ def train_one_epoch(epoch_index):
 
         # Make predictions for this batch
         outputs = model(inputs)
-        # print(outputs)
+        print("outputs", outputs.shape, outputs.dtype)
+        print("labels", labels.shape, labels.dtype)
 
         # labels = labels.softmax(dim=1)
         # Compute the loss and its gradients
@@ -120,11 +121,11 @@ for epoch in range(EPOCHS):
             batch_size = vinputs.shape[0]
             for frame_i in range(batch_size):
                 real_i = i * batch_size + frame_i
-                mask_img = epoch_dir / f"{real_i:0>5}_mask.png"
+                mask_img = epoch_dir / f"eval_{real_i:0>5}_mask.png"
                 torchvision.utils.save_image(
                     voutputs[frame_i, :, :][0, :, :].softmax(0), mask_img
                 )
-                image_img = epoch_dir / f"{real_i:0>5}_image.png"
+                image_img = epoch_dir / f"eval_{real_i:0>5}_image.png"
                 torchvision.utils.save_image(vinputs[frame_i, :, :], image_img)
 
     avg_vloss = running_vloss / (i + 1)
@@ -134,7 +135,7 @@ for epoch in range(EPOCHS):
     if avg_vloss < best_vloss:
         best_vloss = avg_vloss
         # model_path = "/tmp/model_{}_{}".format(timestamp, epoch_number)
-        model_path = epoch_dir / "model"
+        model_path = epoch_dir / "model.pth"
         torch.save(model.state_dict(), model_path)
 
     epoch_number += 1
