@@ -138,5 +138,13 @@ if __name__ == "__main__":
     image_height = 512 * 2
     im = torch.randn(batch_size, input_channels, image_width, image_height)
     x = model(im)
-    print(f"Input shape: {im.shape}")
-    print(f"Output shape: {x.shape}")
+    print(f"Input shape: {im.shape}", im[:, 0:3, 0:3])
+    print(f"Output shape: {x.shape}", x[:, 0:3, 0:3])
+
+    # torch.Size([4, 3, 584, 565])
+    model = Unet(channels_in=3, channels_out=1)
+    # im = torch.randn(4, 3, 584, 565)
+    im = torch.randn(4, 3, 512, 512)
+    x = model(im)
+    print(f"Input shape: {im.shape}", im[:, 0:3, 0:3])
+    print(f"Output shape: {x.shape}", x[:, 0:3, 0:3])
