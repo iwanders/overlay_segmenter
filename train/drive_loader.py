@@ -41,9 +41,15 @@ def load_image(d):
     image = Image.open(d)
     image = ToTensor()(image)
     # Get center 512 by 512 pixels.
-    x = 40
-    y = 10
-    image = image[:, 0 + x : 512 + x, 0 + y : 512 + y]  # Crop to center.
+    if False:
+        x = 40
+        y = 10
+        image = image[:, 0 + x : 512 + x, 0 + y : 512 + y]  # Crop to center.
+    # Get the center 256.
+    if True:
+        x = 100
+        y = 100
+        image = image[:, 0 + x : 256 + x, 0 + y : 256 + y]  # Crop to center.
     return image
 
 
@@ -89,8 +95,8 @@ def load_drive_dataset(device="cpu"):
             # manual1 = torch.round(load_image(manual1_path).to(device)).int()
             print(manual1_path)
             manual1 = target_preprocess(load_image(manual1_path).to(device))
-            manual1 = torch.ones((512, 512)).to(device).to(torch.int64)
-            manual1[128 : (256 + 128), 128 : (256 + 128)] = 0
+            # manual1 = torch.ones((512, 512)).to(device).to(torch.int64)
+            # manual1[128 : (256 + 128), 128 : (256 + 128)] = 0
             manual2_path = DRIVE_DIR / d / "2nd_manual" / f"{basename[0:2]}_manual2.gif"
             manual2 = None
             if manual2_path.is_file():

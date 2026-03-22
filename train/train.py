@@ -54,7 +54,8 @@ model = Unet(channels_in=3, channels_out=2)
 model.to(device)
 
 # optimizer = torch.optim.SGD(model.parameters(), lr=0.0001, momentum=0.9)
-optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+# optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
 
 loss_fn = torch.nn.CrossEntropyLoss()
 
