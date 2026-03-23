@@ -25,6 +25,7 @@ train, test = load_drive_dataset(device=device)
 if True:
     for i, v in enumerate(train):
         epoch_dir = Path("/tmp/train/")
+        epoch_dir.mkdir(exist_ok=True, parents=True)
         out_path = epoch_dir / f"{i:0>3}_train.png"
         torchvision.utils.save_image(
             [v.image, torch.stack([v.manual1, v.manual1, v.manual1])], out_path
@@ -34,10 +35,20 @@ training_set = [(a.image, a.manual1) for a in train]
 validation_set = [(a.image, a.manual1) for a in train + test]
 
 
+BATCH_SIZE_LOOKUP = {
+    (3, 256, 256): 12,  # 6.9 GB of vram
+}
+resolution = tuple(training_set[0][0].shape)
+batch_size = BATCH_SIZE_LOOKUP.get(resolution, 4)
+# Larger batches (no change to learning rate) is not actually better?
+batch_size = 4
+
 # Create data loaders for our datasets; shuffle for training, not for validation
-training_loader = torch.utils.data.DataLoader(training_set, batch_size=4, shuffle=True)
+training_loader = torch.utils.data.DataLoader(
+    training_set, batch_size=batch_size, shuffle=True
+)
 validation_loader = torch.utils.data.DataLoader(
-    validation_set, batch_size=4, shuffle=False
+    validation_set, batch_size=batch_size, shuffle=False
 )
 
 
@@ -56,6 +67,7 @@ model.to(device)
 # optimizer = torch.optim.SGD(model.parameters(), lr=0.0001, momentum=0.9)
 # optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+
 
 loss_fn = torch.nn.CrossEntropyLoss()
 
