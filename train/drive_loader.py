@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 # import torchvision
 
-DRIVE_DIR = Path(os.environ.get("DRIVE_DIR", "../../datasets/DRIVE/"))
+DRIVE_DIR = Path(os.environ.get("DRIVE_DIR", "../../datasets_thirdparty/DRIVE/"))
 """
 test
     images
