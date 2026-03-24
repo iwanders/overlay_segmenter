@@ -105,7 +105,7 @@ class DatasetGenerator:
         return img[:, x : x + tile_size[0], y : y + tile_size[1]]
         # return img[:, y : y + tile_size[1], x : x + tile_size[0]]
 
-    def generate(self, count=1, tile_size=(256, 256), seed=1):
+    def generate(self, count=1, tile_size=(256, 256), seed=1, alpha_factor=1.0):
         results = []
         rng = np.random.default_rng(seed=seed)
         for i in range(count):
@@ -119,7 +119,7 @@ class DatasetGenerator:
             fg_alpha = fg_tile[3:]  # (1, H, W)
 
             # Now, we perform the blit to create the combined texture....
-            combined = alpha_blend(fg_rgb, bg_tile, alpha=fg_alpha)
+            combined = alpha_blend(fg_rgb, bg_tile, alpha=fg_alpha * alpha_factor)
             mask = fg_alpha >= 0.5
             combined = torch.from_numpy(combined)
             mask = torch.from_numpy(mask).to(torch.int64).squeeze()

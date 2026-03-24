@@ -31,8 +31,12 @@ if True:
     background_dir = "../../datasets/background/cave/"
     foreground_dir = "../../datasets/foreground/cave/"
     d = DatasetGenerator(background_dir, foreground_dir=foreground_dir)
-    training_set = d.generate(count=30, tile_size=(256, 256), seed=3423423)
-    validation_set = d.generate(count=30, tile_size=(256, 256), seed=1)
+    training_set = d.generate(
+        count=30, tile_size=(256, 256), seed=3423423, alpha_factor=0.5
+    )
+    validation_set = d.generate(
+        count=30, tile_size=(256, 256), seed=1, alpha_factor=0.5
+    )
     validation_set = validation_set
 
 
@@ -160,7 +164,7 @@ for epoch in range(EPOCHS):
 
             # And lets write that to disk shall we.
             batch_size = vinputs.shape[0]
-            if True:  # and epoch % 10 == 0:
+            if True and (epoch < 10 or epoch % 10 == 0):
                 epoch_dir = Path(f"/tmp/train/{epoch:0>3}/")
                 epoch_dir.mkdir(parents=True, exist_ok=True)
                 for frame_i in range(batch_size):
