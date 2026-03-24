@@ -31,8 +31,8 @@ class DatasetGenerator:
     def __init__(self, background_dir, foreground_dir, limit=float("inf")):
         self._background_dir = Path(background_dir)
         self._foreground_dir = Path(foreground_dir)
-        self._background_crop_top_left = (100, 50)
-        self._background_crop_size = (1700, 800)
+        self._background_crop_top_left = (105, 27)
+        self._background_crop_size = (1700, 825)
 
         self._background_images = []
         self._foreground_images = []
@@ -90,17 +90,20 @@ class DatasetGenerator:
 
     @staticmethod
     def sample_tile(img, tile_size, rng):
-        width = img.shape[0]
-        height = img.shape[1]
+        # channels, width, height
+        width = img.shape[1]
+        height = img.shape[2]
         # Sample mostly from the center, but corners are possible.
-        x = rng.normal(loc=width / 2.0 + tile_size[0] / 2, scale=width / 4.0)
-        y = rng.normal(loc=height / 2.0 + tile_size[1] / 2, scale=height / 4.0)
-
+        x = rng.normal(loc=(width / 2.0) - (tile_size[0] / 2), scale=width / 4.0)
+        y = rng.normal(loc=(height / 2.0) - (tile_size[1] / 2), scale=height / 4.0)
+        # x = (width / 2.0) - (tile_size[0] / 2)
+        # y = (height / 2.0) - (tile_size[1] / 2)
         # Int cast and clamp x and y such that the range falls within the image.
         x = clamp(int(x), 0, width - tile_size[0])
         y = clamp(int(y), 0, height - tile_size[1])
 
         return img[:, x : x + tile_size[0], y : y + tile_size[1]]
+        # return img[:, y : y + tile_size[1], x : x + tile_size[0]]
 
     def generate(self, count=1, tile_size=(256, 256), seed=1):
         results = []
@@ -128,5 +131,5 @@ class DatasetGenerator:
 if __name__ == "__main__":
     background_dir = "../../datasets/background/cave/"
     foreground_dir = "../../datasets/foreground/cave/"
-    d = DatasetGenerator(background_dir, foreground_dir=foreground_dir)
+    d = DatasetGenerator(background_dir, foreground_dir=foreground_dir, limit=2)
     d.debug_dump()
