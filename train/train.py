@@ -160,7 +160,7 @@ for epoch in range(EPOCHS):
 
             # And lets write that to disk shall we.
             batch_size = vinputs.shape[0]
-            if True and epoch % 10 == 0:
+            if True:  # and epoch % 10 == 0:
                 epoch_dir = Path(f"/tmp/train/{epoch:0>3}/")
                 epoch_dir.mkdir(parents=True, exist_ok=True)
                 for frame_i in range(batch_size):
