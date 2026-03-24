@@ -8,6 +8,7 @@ from pathlib import Path
 import torch
 import torchvision
 
+from dataset_generator import DatasetGenerator
 from drive_loader import load_drive_dataset
 from model import Unet
 
@@ -22,17 +23,34 @@ print(f"Using device: {device}")
 
 train, test = load_drive_dataset(device=device)
 
-if True:
-    for i, v in enumerate(train):
-        epoch_dir = Path("/tmp/train/")
-        epoch_dir.mkdir(exist_ok=True, parents=True)
-        out_path = epoch_dir / f"{i:0>3}_train.png"
-        torchvision.utils.save_image(
-            [v.image, torch.stack([v.manual1, v.manual1, v.manual1])], out_path
-        )
 
 training_set = [(a.image, a.manual1) for a in train]
 validation_set = [(a.image, a.manual1) for a in train + test]
+
+if True:
+    background_dir = "../../datasets/background/cave/"
+    foreground_dir = "../../datasets/foreground/cave/"
+    d = DatasetGenerator(background_dir, foreground_dir=foreground_dir)
+    training_set = d.generate(count=30, tile_size=(256, 256), seed=3423423)
+    validation_set = d.generate(count=30, tile_size=(256, 256), seed=1)
+    validation_set = validation_set
+
+
+if True:
+    for i, (img, mask) in enumerate(training_set):
+        epoch_dir = Path("/tmp/train/")
+        epoch_dir.mkdir(exist_ok=True, parents=True)
+        out_path = epoch_dir / f"train_{i:0>3}.png"
+        torchvision.utils.save_image([img, torch.stack([mask, mask, mask])], out_path)
+    for i, (img, mask) in enumerate(validation_set):
+        epoch_dir = Path("/tmp/train/")
+        epoch_dir.mkdir(exist_ok=True, parents=True)
+        out_path = epoch_dir / f"validation_{i:0>3}.png"
+        torchvision.utils.save_image([img, torch.stack([mask, mask, mask])], out_path)
+
+
+training_set = [(a.to(device), b.to(device)) for a, b in training_set]
+validation_set = [(a.to(device), b.to(device)) for a, b in validation_set]
 
 
 BATCH_SIZE_LOOKUP = {

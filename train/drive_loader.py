@@ -93,7 +93,7 @@ def load_drive_dataset(device="cpu"):
             mask = load_image(mask_path).to(device)
             manual1_path = DRIVE_DIR / d / "1st_manual" / f"{basename[0:2]}_manual1.gif"
             # manual1 = torch.round(load_image(manual1_path).to(device)).int()
-            print(manual1_path)
+            # print(manual1_path)
             manual1 = target_preprocess(load_image(manual1_path).to(device))
             # manual1 = torch.ones((512, 512)).to(device).to(torch.int64)
             # manual1[128 : (256 + 128), 128 : (256 + 128)] = 0

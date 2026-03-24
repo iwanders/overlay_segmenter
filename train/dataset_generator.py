@@ -37,6 +37,7 @@ class DatasetGenerator:
         self._background_images = []
         self._foreground_images = []
         self._limit = limit
+        self.load_images()
 
     def load_image(self, d):
         image = Image.open(d)
@@ -92,8 +93,8 @@ class DatasetGenerator:
         width = img.shape[0]
         height = img.shape[1]
         # Sample mostly from the center, but corners are possible.
-        x = rng.normal(loc=width / 2.0, scale=width / 2.0)
-        y = rng.normal(loc=height / 2.0, scale=height / 2.0)
+        x = rng.normal(loc=width / 2.0 + tile_size[0] / 2, scale=width / 4.0)
+        y = rng.normal(loc=height / 2.0 + tile_size[1] / 2, scale=height / 4.0)
 
         # Int cast and clamp x and y such that the range falls within the image.
         x = clamp(int(x), 0, width - tile_size[0])
@@ -118,7 +119,7 @@ class DatasetGenerator:
             combined = alpha_blend(fg_rgb, bg_tile, alpha=fg_alpha)
             mask = fg_alpha >= 0.5
             combined = torch.from_numpy(combined)
-            mask = torch.from_numpy(mask).to(torch.bool)
+            mask = torch.from_numpy(mask).to(torch.int64).squeeze()
             results.append((combined, mask))
 
         return results
@@ -128,5 +129,4 @@ if __name__ == "__main__":
     background_dir = "../../datasets/background/cave/"
     foreground_dir = "../../datasets/foreground/cave/"
     d = DatasetGenerator(background_dir, foreground_dir=foreground_dir)
-    d.load_images()
     d.debug_dump()
