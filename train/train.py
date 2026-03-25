@@ -26,17 +26,24 @@ train, test = load_drive_dataset(device=device)
 training_set = [(a.image, a.manual1) for a in train]
 validation_set = [(a.image, a.manual1) for a in train + test]
 
+# Currently, tile size needs to be smaller than the overlay tiles.
+# tile_size = (400, 400)
+tile_size = (256, 256)
+
 if True:
-    background_dir = "../../datasets/background/cave/"
-    foreground_dir = "../../datasets/foreground/cave/"
-    d = DatasetGenerator(background_dir, foreground_dir=foreground_dir)
-    training_set = d.generate(
-        count=100, tile_size=(256, 256), seed=34234233, alpha_factor=0.5
-    )
-    validation_set = d.generate(
-        count=30, tile_size=(256, 256), seed=2, alpha_factor=0.5
-    )
-    validation_set = validation_set
+    training_set = []
+    validation_set = []
+    for tileset in ["cave", "barracks"]:
+        background_dir = f"../../datasets/background/{tileset}/"
+        foreground_dir = f"../../datasets/foreground/{tileset}/"
+        d = DatasetGenerator(background_dir, foreground_dir=foreground_dir)
+        training_set.extend(
+            d.generate(count=100, tile_size=tile_size, seed=34234233, alpha_factor=0.5)
+        )
+        validation_set.extend(
+            d.generate(count=30, tile_size=tile_size, seed=2, alpha_factor=0.5)
+        )
+    # validation_set = validation_set
 
 
 if True:

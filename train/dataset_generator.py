@@ -102,6 +102,7 @@ class DatasetGenerator:
         # Int cast and clamp x and y such that the range falls within the image.
         x = clamp(int(x), 0, width - tile_size[0])
         y = clamp(int(y), 0, height - tile_size[1])
+        # print(x, y, width, height)
 
         return img[:, x : x + tile_size[0], y : y + tile_size[1]]
         # return img[:, y : y + tile_size[1], x : x + tile_size[0]]
