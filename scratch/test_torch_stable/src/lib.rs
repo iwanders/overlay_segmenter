@@ -24,6 +24,9 @@ struct AtenTensorOpaque {
 type AtenTensorHandle = *mut AtenTensorOpaque;
 type AOTITorchError = i32;
 
+// Input param: AtenTensorHandle
+// Output param: &mut AtenTensorHandle
+
 unsafe extern "C" {
     // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/inductor/aoti_torch/c/shim.h#L56
     //
@@ -83,6 +86,8 @@ unsafe extern "C" {
     // Not in my version :<
     //
 
+    fn aoti_torch_item_float32(tensor: AtenTensorHandle, ret_value: *mut f32) -> AOTITorchError;
+
     // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/inductor/aoti_torch/c/shim.h#L244
 
     fn aoti_torch_get_device_type(
@@ -120,14 +125,14 @@ unsafe extern "C" {
     // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.h#L54C1-L54C145
     // AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_add_Tensor(AtenTensorHandle self, AtenTensorHandle other, double alpha, AtenTensorHandle* ret0);
     fn aoti_torch_cpu_add_Tensor(
-        _self: &AtenTensorHandle,
-        other: &AtenTensorHandle,
+        _self: AtenTensorHandle,
+        other: AtenTensorHandle,
         alpha: f64,
         ret0: &mut AtenTensorHandle,
     ) -> AOTITorchError;
 
     // https://github.com/pytorch/pytorch/blob/274a26df346a9898b8496745c0b8b7069cb84507/torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h#L18
-    fn aoti_torch_aten_fill__Scalar(_self: &AtenTensorHandle, value: f64) -> AOTITorchError;
+    fn aoti_torch_aten_fill__Scalar(_self: AtenTensorHandle, value: f64) -> AOTITorchError;
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -264,7 +269,9 @@ pub fn main() {
         let res = unsafe { aoti_torch_get_device_index(handle_res, &mut ret_device_index) };
         println!("res: {} ret_device_type: {ret_device_index}", res);
 
-        let res =
-            unsafe { aoti_torch_cpu_add_Tensor(&mut handle_d, &handle_e, 1.0, &mut handle_res) };
+        let res = unsafe { aoti_torch_cpu_add_Tensor(handle_d, handle_e, 1.0, &mut handle_res) };
+        let mut sum_result = 0.0;
+        let res = unsafe { aoti_torch_item_float32(handle_res, &mut sum_result) };
+        println!("res: {} sum_result: {sum_result}", res);
     }
 }
