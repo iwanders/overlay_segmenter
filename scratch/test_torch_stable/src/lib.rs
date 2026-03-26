@@ -1,8 +1,21 @@
 // https://docs.pytorch.org/docs/stable/notes/libtorch_stable_abi.html
+//
+// Docs aren't great, the the stable c++ api is well documented:
+// https://github.com/pytorch/pytorch/tree/main/torch/csrc/stable
+//
 // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/inductor/aoti_torch/c/shim.h
 // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h#L21
 
 // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/inductor/aoti_torch/c/macros.h#L46
+
+// Hmm, the stable c++ interface actually goes through the call inteface; https://github.com/pytorch/pytorch/blob/e3d4dcc4adddff454ceeef71b3d735acc5e23344/torch/csrc/stable/ops.h#L625
+//
+//
+// Bunch of tests here: https://github.com/pytorch/pytorch/tree/1c0fd99bc15e998eab3cee79588544a033f0e4df/test/cpp_extensions/libtorch_agn_2_10_extension/csrc
+// empty is here: https://github.com/pytorch/pytorch/blob/1c0fd99bc15e998eab3cee79588544a033f0e4df/test/cpp_extensions/libtorch_agn_2_10_extension/csrc/my_empty.cpp#L10-L18
+// Through; https://github.com/pytorch/pytorch/blob/1c0fd99bc15e998eab3cee79588544a033f0e4df/test/cpp_extensions/libtorch_agn_2_10_extension/csrc/my_empty.cpp#L10-L18
+
+// Maybe the problem is with my torch version?
 
 #[repr(C)]
 struct AtenTensorOpaque {
@@ -70,12 +83,30 @@ unsafe extern "C" {
     // Not in my version :<
     //
 
+    // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/inductor/aoti_torch/c/shim.h#L244
+
+    fn aoti_torch_get_device_type(
+        tensor: AtenTensorHandle,
+        ret_device_type: &mut i32,
+    ) -> AOTITorchError;
+    fn aoti_torch_get_device_index(
+        tensor: AtenTensorHandle,
+        ret_device_type: &mut i32,
+    ) -> AOTITorchError;
+
     // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/inductor/aoti_torch/c/shim.h#L180
     //
     fn aoti_torch_delete_tensor_object(tensor: AtenTensorHandle) -> AOTITorchError;
 
-    // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/inductor/aoti_torch/c/shim.h#L293
+    fn aoti_torch_new_uninitialized_tensor(ret: &mut AtenTensorHandle) -> AOTITorchError;
 
+    // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/inductor/aoti_torch/c/shim.h#L137
+    fn aoti_torch_scalar_to_tensor_float32(
+        value: f32,
+        ret_new_tensor: &mut AtenTensorHandle,
+    ) -> AOTITorchError;
+
+    // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/inductor/aoti_torch/c/shim.h#L293
     fn aoti_torch_empty_strided(
         ndim: i64,
         sizes_ptr: *const i64,
@@ -94,6 +125,9 @@ unsafe extern "C" {
         alpha: f64,
         ret0: &mut AtenTensorHandle,
     ) -> AOTITorchError;
+
+    // https://github.com/pytorch/pytorch/blob/274a26df346a9898b8496745c0b8b7069cb84507/torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h#L18
+    fn aoti_torch_aten_fill__Scalar(_self: &AtenTensorHandle, value: f64) -> AOTITorchError;
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -145,11 +179,18 @@ pub fn main() {
         //     ret_new_tensor: &mut AtenTensorHandle,
         // ) -> AOTITorchError;
         let mut handle_a: AtenTensorHandle = std::ptr::null_mut();
+        println!("handle_a init: {}", unsafe {
+            aoti_torch_new_uninitialized_tensor(&mut handle_a)
+        });
         let mut handle_b: AtenTensorHandle = std::ptr::null_mut();
+        println!("handle_b init: {}", unsafe {
+            aoti_torch_new_uninitialized_tensor(&mut handle_b)
+        });
         let stride: i64 = 1;
         let size: i64 = 4;
         // let device = Device::cuda().0;
         let device = Device::cpu().0;
+        let device_index: i32 = -1;
         let res = unsafe {
             aoti_torch_empty_strided(
                 1,
@@ -157,7 +198,7 @@ pub fn main() {
                 &stride,
                 DType::float32().0,
                 device,
-                0,
+                device_index,
                 &mut handle_a,
             )
         };
@@ -169,13 +210,16 @@ pub fn main() {
                 &stride,
                 DType::float32().0,
                 device,
-                0,
+                device_index,
                 &mut handle_b,
             )
         };
         println!("res: {}", res);
 
         let mut handle_c: AtenTensorHandle = std::ptr::null_mut();
+        println!("handle_c init: {}", unsafe {
+            aoti_torch_new_uninitialized_tensor(&mut handle_c)
+        });
         let res = unsafe {
             aoti_torch_empty_strided(
                 1,
@@ -183,12 +227,44 @@ pub fn main() {
                 &stride,
                 DType::float32().0,
                 device,
-                0,
+                device_index,
                 &mut handle_c,
             )
         };
         println!("res: {}", res);
+        let mut ret_device_index: i32 = 34234;
+        let res = unsafe { aoti_torch_get_device_index(handle_c, &mut ret_device_index) };
+        println!("handle_c res: {} ret_device_type: {ret_device_index}", res);
 
-        let res = unsafe { aoti_torch_cpu_add_Tensor(&handle_a, &handle_b, 1.0, &mut handle_c) };
+        // let res = unsafe { aoti_torch_cpu_add_Tensor(&handle_a, &handle_b, 1.0, &mut handle_c) };
+        //
+
+        // Maybe with scalar tensors?
+        let mut handle_d: AtenTensorHandle = std::ptr::null_mut();
+        println!("handle_d init: {}", unsafe {
+            aoti_torch_new_uninitialized_tensor(&mut handle_d)
+        });
+        let res = unsafe { aoti_torch_scalar_to_tensor_float32(3.3, &mut handle_d) };
+        let mut handle_e: AtenTensorHandle = std::ptr::null_mut();
+        println!("handle_e init: {}", unsafe {
+            aoti_torch_new_uninitialized_tensor(&mut handle_e)
+        });
+        let res = unsafe { aoti_torch_scalar_to_tensor_float32(5.3, &mut handle_e) };
+        let mut handle_res: AtenTensorHandle = std::ptr::null_mut();
+        println!("handle_res init: {}", unsafe {
+            aoti_torch_new_uninitialized_tensor(&mut handle_res)
+        });
+        let res = unsafe { aoti_torch_scalar_to_tensor_float32(0.0, &mut handle_res) };
+        println!("res: {}", res);
+
+        let mut ret_device_type: i32 = 34234;
+        let res = unsafe { aoti_torch_get_device_type(handle_res, &mut ret_device_type) };
+        println!("res: {} ret_device_type: {ret_device_type}", res);
+        let mut ret_device_index: i32 = 34234;
+        let res = unsafe { aoti_torch_get_device_index(handle_res, &mut ret_device_index) };
+        println!("res: {} ret_device_type: {ret_device_index}", res);
+
+        let res =
+            unsafe { aoti_torch_cpu_add_Tensor(&mut handle_d, &handle_e, 1.0, &mut handle_res) };
     }
 }
