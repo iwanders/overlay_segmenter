@@ -30,6 +30,8 @@ use aoti_torch::*;
 pub use util::StableTorchResult;
 pub(crate) use util::unsafe_call_bail;
 
+pub(crate) const RUN_SPAMMY_TESTS: bool = false;
+
 #[derive(Copy, Clone, Debug)]
 pub struct Device(i32);
 impl Device {

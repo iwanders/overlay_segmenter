@@ -106,5 +106,6 @@ unsafe extern "C" {
     ) -> AOTITorchError;
 
     // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/inductor/aoti_torch/c/shim.h#L345
-    fn aoti_torch_new_uninitialized_tensor(ret: &mut AtenTensorHandle) -> AOTITorchError;
+    pub unsafe fn aoti_torch_new_uninitialized_tensor(ret: &mut AtenTensorHandle)
+    -> AOTITorchError;
 }

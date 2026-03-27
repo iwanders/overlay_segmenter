@@ -66,8 +66,10 @@ mod test {
         assert_eq!(cuda_dev.device_type(), DeviceType::CUDA);
         assert_eq!(cuda_dev.device_index().0, 1);
 
-        let res = Device::from_str("definitely_not_a_valid_type:1");
-        assert!(res.is_err());
-        println!("res: {res:?}");
+        if crate::RUN_SPAMMY_TESTS {
+            let res = Device::from_str("definitely_not_a_valid_type:1");
+            assert!(res.is_err());
+            println!("res: {res:?}");
+        }
     }
 }

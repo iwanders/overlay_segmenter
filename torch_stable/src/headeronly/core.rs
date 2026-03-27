@@ -79,12 +79,14 @@ pub enum Layout {
 // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/headeronly/core/ScalarType.h#L258-L264
 // List is here: https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/headeronly/core/ScalarType.h#L103
 //
+// Lets go with the safe solution:
 // /tmp/pytorch$ touch torch/headeronly/macros/cmake_macros.h
 // /tmp/pytorch$ cat test.cpp
 // #include "torch/headeronly/core/ScalarType.h"
 // int main(){
 // }
 // /tmp/pytorch$ gcc -I. -E test.cpp -o test.o
+// And then search for 'enum class ScalarType' in that test.o file.
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(i8)]
@@ -136,7 +138,6 @@ pub enum ScalarType {
     Int7,
     Float8_e8m0fnu,
     Float4_e2m1fn_x2,
-
     Undefined,
-    NumOptions,
+    // NumOptions,
 }
