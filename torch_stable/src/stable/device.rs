@@ -1,12 +1,11 @@
 // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/stable/device.h
 
-use super::super::AOTI_TORCH_SUCCESS;
-use super::accelerator::DeviceIndex;
 use super::c::torch_parse_device_string;
 use crate::{StableTorchResult, unsafe_call_bail};
 use anyhow::{anyhow, bail};
 
-use crate::headeronly::core::DeviceType;
+pub use super::accelerator::DeviceIndex;
+pub use crate::headeronly::core::DeviceType;
 use std::ffi::CString;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

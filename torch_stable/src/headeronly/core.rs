@@ -59,3 +59,84 @@ impl TryFrom<u32> for DeviceType {
         }
     }
 }
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(i8)]
+pub enum Layout {
+    Strided,
+    Sparse,
+    SparseCsr,
+    Mkldnn,
+    SparseCsc,
+    SparseBsr,
+    SparseBsc,
+    Jagged,
+    NumOptions,
+}
+
+// ScalarType
+// Tostring; https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/headeronly/core/ScalarType.h#L320
+// https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/headeronly/core/ScalarType.h#L258-L264
+// List is here: https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/headeronly/core/ScalarType.h#L103
+//
+// /tmp/pytorch$ touch torch/headeronly/macros/cmake_macros.h
+// /tmp/pytorch$ cat test.cpp
+// #include "torch/headeronly/core/ScalarType.h"
+// int main(){
+// }
+// /tmp/pytorch$ gcc -I. -E test.cpp -o test.o
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(i8)]
+#[allow(non_camel_case_types)]
+pub enum ScalarType {
+    Byte,
+    Char,
+    Short,
+    Int,
+    Long,
+    Half,
+    Float,
+    Double,
+    ComplexHalf,
+    ComplexFloat,
+    ComplexDouble,
+    Bool,
+    QInt8,
+    QUInt8,
+    QInt32,
+    BFloat16,
+    QUInt4x2,
+    QUInt2x4,
+    Bits1x8,
+    Bits2x4,
+    Bits4x2,
+    Bits8,
+    Bits16,
+    Float8_e5m2,
+    Float8_e4m3fn,
+    Float8_e5m2fnuz,
+    Float8_e4m3fnuz,
+    UInt16,
+    UInt32,
+    UInt64,
+    UInt1,
+    UInt2,
+    UInt3,
+    UInt4,
+    UInt5,
+    UInt6,
+    UInt7,
+    Int1,
+    Int2,
+    Int3,
+    Int4,
+    Int5,
+    Int6,
+    Int7,
+    Float8_e8m0fnu,
+    Float4_e2m1fn_x2,
+
+    Undefined,
+    NumOptions,
+}
