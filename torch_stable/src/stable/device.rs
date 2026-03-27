@@ -35,12 +35,13 @@ pub enum DeviceType {
     PrivateUse1 = 20, // PrivateUse1 device
 }
 
-impl TryFrom<i32> for DeviceType {
+impl TryFrom<u32> for DeviceType {
     type Error = ();
 
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
-            v if v == (DeviceType::CPU as i32) => Ok(DeviceType::CPU),
+            v if v == (DeviceType::CPU as u32) => Ok(DeviceType::CPU),
+            v if v == (DeviceType::CUDA as u32) => Ok(DeviceType::CUDA),
             _ => Err(()),
         }
     }
@@ -53,15 +54,20 @@ pub struct Device {
 
 impl Device {
     pub fn from_str(device_string: &str) -> Result<Self, ()> {
+        if device_string.is_empty() {
+            // This causes an assert under the hood.
+            return Err(());
+        }
         let as_cstr = CString::new(device_string).expect("CString::new failed");
         let device_string = as_cstr.as_ptr();
         let mut device_type = 0u32;
         let mut device_index = 0i32;
-        if unsafe { torch_parse_device_string(device_string, &mut device_type, &mut device_index) }
-            == AOTI_TORCH_SUCCESS
-        {
+        let res = unsafe {
+            torch_parse_device_string(device_string, &mut device_type, &mut device_index)
+        };
+        if res == AOTI_TORCH_SUCCESS {
             Ok(Self {
-                device_type: device_index.try_into()?,
+                device_type: device_type.try_into()?,
                 device_index: DeviceIndex(device_index),
             })
         } else {
@@ -92,6 +98,12 @@ mod test {
     use super::*;
     #[test]
     fn test_device_constructor() {
-        let cpu = Device::from_str("cpu");
+        let cpu = Device::from_str("cpu").unwrap();
+        assert_eq!(cpu.device_type(), DeviceType::CPU);
+        let cuda_dev = Device::from_str("cuda:0").unwrap();
+        assert_eq!(cuda_dev.device_type(), DeviceType::CUDA);
+        let cuda_dev = Device::from_str("cuda:1").unwrap();
+        assert_eq!(cuda_dev.device_type(), DeviceType::CUDA);
+        assert_eq!(cuda_dev.device_index().0, 1);
     }
 }
