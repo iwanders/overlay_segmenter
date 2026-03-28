@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 license = "BSD-3-Clause"
 
+[lib]
+#crate-type=["cdylib", "rlib"]
+
 [dependencies]
 libc = "0.2.183"
 anyhow = "1.0.102"

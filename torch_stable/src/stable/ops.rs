@@ -115,10 +115,11 @@ mod test {
     fn test_tensor_ops_to() -> StableTorchResult<()> {
         use crate::contrib::{FromScalar, ToScalar};
         let a = Tensor::from_f32(5.0).unwrap();
+        let a = a.unsqueeze(0)?; // need a dimension to perform a matmul.
         let b = a.to(&ToOptions {
-            device: Some(Device::from_str("cpu")?),
-            // device: Some(Device::from_str("cuda:5")?),
-            copy: true,
+            // device: Some(Device::from_str("cpu")?),
+            device: Some(Device::from_str("cuda:0")?),
+            copy: false,
             ..Default::default()
         })?;
         Ok(())
