@@ -1,6 +1,11 @@
 // This holds things that aren't actually part of the upstream stable API, but make sense.
 // They're implemented as a trait, to make it clear it is opt in.
 
+// Random notes:
+// https://github.com/pytorch/pytorch/issues/34646
+// https://github.com/pytorch/pytorch/issues/107112
+// https://docs.pytorch.org/docs/stable/dlpack.html#torch.utils.dlpack.from_dlpack
+
 use crate::aoti_torch::AtenTensorHandle;
 use crate::aoti_torch::*;
 use crate::stable::tensor::Tensor;

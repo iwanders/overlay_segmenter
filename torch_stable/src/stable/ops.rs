@@ -47,4 +47,16 @@ mod test {
         let c = a.subtract(&b).unwrap();
         assert_eq!(c.to_f32().unwrap(), 2.0);
     }
+    #[test]
+    fn test_tensor_ops_to() -> StableTorchResult<()> {
+        use crate::contrib::{FromScalar, ToScalar};
+        let a = Tensor::from_f32(5.0).unwrap();
+        a.to(&ToOptions {
+            device: Some(Device::from_str("cuda")?),
+            ..Default::default()
+        })
+        .unwrap();
+
+        Ok(())
+    }
 }

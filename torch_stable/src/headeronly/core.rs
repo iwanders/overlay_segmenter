@@ -1,4 +1,8 @@
 use anyhow::anyhow;
+
+// https://github.com/pytorch/pytorch/blob/3848e11d554a7f49925b593c40b8be0b86ac6b3f/torch/csrc/stable/stableivalue_conversions.h#L100-L101
+// Gaaah, these are the header side values only, they always call through the shim to get the actual values.
+
 // https://github.com/pytorch/pytorch/tree/fbdef9635b009f670321b1263bec7b48e2d7379f/torch/headeronly/core
 
 // https://github.com/pytorch/pytorch/blob/fbdef9635b009f670321b1263bec7b48e2d7379f/torch/headeronly/core/DeviceType.h#L35
