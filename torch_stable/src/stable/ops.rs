@@ -14,6 +14,7 @@ impl Tensor {
         ));
         Ok(Self::from_handle(handle_res))
     }
+    // For some reason, addition is NOT a default op? >_<
 }
 
 #[cfg(test)]
@@ -21,12 +22,11 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_tensor_from_scalar() {
+    fn test_tensor_ops_subtract() {
         use crate::contrib::{FromScalar, ToScalar};
         let a = Tensor::from_f32(5.0).unwrap();
         let b = Tensor::from_f32(3.0).unwrap();
         let c = a.subtract(&b).unwrap();
-
         assert_eq!(c.to_f32().unwrap(), 2.0);
     }
 }

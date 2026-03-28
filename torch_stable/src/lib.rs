@@ -31,4 +31,5 @@ use aoti_torch::*;
 pub use util::StableTorchResult;
 pub(crate) use util::{unsafe_call_bail, unsafe_call_panic};
 
+#[cfg(test)]
 pub(crate) const RUN_SPAMMY_TESTS: bool = false;

@@ -42,15 +42,32 @@ impl ToScalar for Tensor {
     }
 }
 
+pub trait Math {
+    fn add(&self, other: &Tensor) -> StableTorchResult<Tensor>;
+}
+impl Math for Tensor {
+    fn add(&self, other: &Tensor) -> StableTorchResult<Tensor> {
+        let mut handle_res: AtenTensorHandle = std::ptr::null_mut();
+        // Yes, this is a subtract with self - alpha * other with alpha = -1.0.
+        unsafe_call_bail!(aoti_torch_aten_subtract_Tensor(
+            self.get(),
+            other.get(),
+            -1.0,
+            &mut handle_res
+        ));
+        Ok(Self::from_handle(handle_res))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
 
-    use crate::headeronly::core::{Layout, ScalarType};
+    use crate::headeronly::core::ScalarType;
 
-    use crate::stable::device::{Device, DeviceIndex, DeviceType};
+    use crate::stable::device::{Device, DeviceIndex};
     #[test]
-    fn test_tensor_from_to_scalar() {
+    fn test_tensor_conbtrib_from_to_scalar() {
         use crate::contrib::FromScalar;
         use crate::contrib::ToScalar;
         let t = Tensor::from_f32(std::f32::consts::PI).unwrap();
@@ -71,5 +88,14 @@ mod test {
         let t = Tensor::from_f64(std::f64::consts::PI).unwrap();
         assert_eq!(t.scalar_type(), ScalarType::Double);
         assert_eq!(t.to_f64().unwrap(), std::f64::consts::PI);
+    }
+
+    #[test]
+    fn test_tensor_contrib_addition() {
+        use crate::contrib::{FromScalar, ToScalar};
+        let a = Tensor::from_f32(5.0).unwrap();
+        let b = Tensor::from_f32(3.0).unwrap();
+        let c = a.add(&b).unwrap();
+        assert_eq!(c.to_f32().unwrap(), 8.0);
     }
 }
