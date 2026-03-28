@@ -47,19 +47,30 @@ pub struct ToOptions {
 }
 
 impl Tensor {
-    // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/stable/ops.h#L1037
-    pub fn subtract(&self, other: &Tensor) -> StableTorchResult<Tensor> {
-        let mut handle_res: AtenTensorHandle = std::ptr::null_mut();
-        unsafe_call_bail!(aoti_torch_aten_subtract_Tensor(
-            self.get(),
-            other.get(),
-            1.0,
-            &mut handle_res
-        ));
-        Ok(Self::from_handle(handle_res))
+    // https://github.com/pytorch/pytorch/blob/v2.11.0/torch/csrc/stable/ops.h#L442
+    pub fn unsqueeze(&self, dim: usize) -> StableTorchResult<Tensor> {
+        let mut stack: [StableIValue; 2] = [self.into(), dim.into()];
+        println!("self: {:?}", self.get() as *const Tensor);
+        println!("Stack: {:?}", stack);
+        for (i, v) in stack.iter().enumerate() {
+            println!("i: {i}: addr: 0x{:x?}", v as *const StableIValue);
+        }
+        unsafe_call_dispatch_bail!("aten::unsqueeze", "", stack.as_mut_slice());
+        stack[0].try_into()
     }
-    // For some reason, addition is NOT a default op? >_<
 
+    // Lets try a simpler operation first.
+    // https://github.com/pytorch/pytorch/blob/v2.11.0/torch/csrc/stable/ops.h#L531
+    pub fn matmul(&self, other: &Tensor) -> StableTorchResult<Tensor> {
+        let mut stack: [StableIValue; 2] = [self.into(), other.into()];
+        println!("self: {:?}", self.get() as *const Tensor);
+        println!("Stack: {:?}", stack);
+        for (i, v) in stack.iter().enumerate() {
+            println!("i: {i}: addr: 0x{:x?}", v as *const StableIValue);
+        }
+        unsafe_call_dispatch_bail!("aten::matmul", "", stack.as_mut_slice());
+        stack[0].try_into()
+    }
     // https://github.com/pytorch/pytorch/blob/v2.11.0/torch/csrc/stable/ops.h#L824
     pub fn to(&self, options: &ToOptions) -> StableTorchResult<Tensor> {
         let mut stack: [StableIValue; 8] = [
@@ -80,6 +91,19 @@ impl Tensor {
         unsafe_call_dispatch_bail!("aten::to", "dtype_layout", stack.as_mut_slice());
         stack[0].try_into()
     }
+
+    // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/stable/ops.h#L1037
+    pub fn subtract(&self, other: &Tensor) -> StableTorchResult<Tensor> {
+        let mut handle_res: AtenTensorHandle = std::ptr::null_mut();
+        unsafe_call_bail!(aoti_torch_aten_subtract_Tensor(
+            self.get(),
+            other.get(),
+            1.0,
+            &mut handle_res
+        ));
+        Ok(Self::from_handle(handle_res))
+    }
+    // For some reason, addition is NOT a default op? >_<
 }
 
 #[cfg(test)]
@@ -105,6 +129,30 @@ mod test {
         })
         .unwrap();
         std::process::exit(0);
+
+        Ok(())
+    }
+    #[test]
+    fn test_tensor_ops_matmul() -> StableTorchResult<()> {
+        use crate::contrib::{FromScalar, ToScalar};
+        let a = Tensor::from_f32(5.0).unwrap();
+        let b = Tensor::from_f32(3.0).unwrap();
+        let a = a.unsqueeze(0).unwrap();
+        let b = b.unsqueeze(0).unwrap();
+        assert_eq!(b.layout(), Layout::Strided); // Calling on uninitialised tensor is an error.
+        assert_eq!(b.layout(), Layout::Strided); // Calling on uninitialised tensor is an error.
+        a.matmul(&b).unwrap();
+        std::process::exit(0);
+
+        Ok(())
+    }
+    #[test]
+    fn test_tensor_ops_unsqueeze() -> StableTorchResult<()> {
+        use crate::contrib::{FromScalar, ToScalar};
+        let a = Tensor::from_f32(5.0).unwrap();
+        let a = a.unsqueeze(0).unwrap();
+        println!("dim: {:?}", a.sizes());
+        assert_eq!(a.sizes(), &[1]);
 
         Ok(())
     }

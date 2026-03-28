@@ -35,6 +35,23 @@ where
     }
 }
 
+impl From<i32> for StableIValue {
+    fn from(value: i32) -> Self {
+        let mut res_bytes = [0u8; 8];
+        let input_bytes = value.to_ne_bytes();
+        res_bytes[0..input_bytes.len()].copy_from_slice(input_bytes.as_slice());
+        StableIValue(u64::from_ne_bytes(res_bytes))
+    }
+}
+impl From<bool> for StableIValue {
+    fn from(value: bool) -> Self {
+        let mut res_bytes = [0u8; 8];
+        let input_bytes = if value { &[1] } else { &[0] };
+        res_bytes[0..input_bytes.len()].copy_from_slice(input_bytes.as_slice());
+        StableIValue(u64::from_ne_bytes(res_bytes))
+    }
+}
+
 // THis is all wrong :(
 // https://github.com/pytorch/pytorch/blob/3848e11d554a7f49925b593c40b8be0b86ac6b3f/torch/csrc/stable/stableivalue_conversions.h#L83
 // In combination with
@@ -66,18 +83,18 @@ impl From<MemoryFormat> for StableIValue {
 }
 impl From<Layout> for StableIValue {
     fn from(value: Layout) -> Self {
-        Self(value as u64)
-    }
-}
-
-impl From<bool> for StableIValue {
-    fn from(value: bool) -> Self {
-        Self(value as u64)
+        value.to_constant().into()
     }
 }
 
 impl From<i64> for StableIValue {
     fn from(value: i64) -> Self {
+        let bitwise_value: u64 = u64::from_ne_bytes(value.to_ne_bytes());
+        Self(bitwise_value)
+    }
+}
+impl From<usize> for StableIValue {
+    fn from(value: usize) -> Self {
         let bitwise_value: u64 = u64::from_ne_bytes(value.to_ne_bytes());
         Self(bitwise_value)
     }

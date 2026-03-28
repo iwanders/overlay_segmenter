@@ -1,5 +1,7 @@
 use anyhow::anyhow;
 
+use crate::aoti_torch::*;
+
 // https://github.com/pytorch/pytorch/blob/3848e11d554a7f49925b593c40b8be0b86ac6b3f/torch/csrc/stable/stableivalue_conversions.h#L100-L101
 // Gaaah, these are the header side values only, they always call through the shim to get the actual values.
 // TODO:
@@ -80,6 +82,22 @@ pub enum Layout {
     SparseBsc,
     Jagged,
     // NumOptions,
+}
+impl Layout {
+    pub fn to_constant(&self) -> i32 {
+        unsafe {
+            match self {
+                Layout::Strided => aoti_torch_layout_strided(),
+                Layout::Sparse => aoti_torch_layout_sparse_coo(),
+                Layout::SparseCsr => aoti_torch_layout_sparse_csr(),
+                Layout::SparseCsc => aoti_torch_layout_sparse_csc(),
+                Layout::SparseBsr => aoti_torch_layout_sparse_bsr(),
+                Layout::SparseBsc => aoti_torch_layout_sparse_bsc(),
+                Layout::Mkldnn => aoti_torch_layout__mkldnn(),
+                Layout::Jagged => aoti_torch_layout_jagged(),
+            }
+        }
+    }
 }
 
 impl TryFrom<i32> for Layout {
