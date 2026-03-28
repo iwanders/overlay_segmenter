@@ -25,6 +25,7 @@ pub mod aoti_torch;
 pub mod contrib;
 pub mod headeronly;
 pub mod stable;
+mod support;
 mod util;
 
 use aoti_torch::*;

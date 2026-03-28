@@ -39,6 +39,12 @@ where
                 let value_u64: u64 = converted.0;
                 // println!("vvalue_u64 : {value_u64:x?}");
                 if true {
+                    let raw_malloc_ptr_u64 =
+                        unsafe { crate::support::iw_stable_torch_alloc_stableivalue() };
+                    unsafe { *raw_malloc_ptr_u64 = value_u64 };
+                    let ptr_as_u64: u64 = raw_malloc_ptr_u64 as u64;
+                    StableIValue(ptr_as_u64)
+                } else if false {
                     let boxed_stable_value: Box<u64> = Box::new(value_u64);
                     let stable_value = Box::into_raw(boxed_stable_value);
                     let ptr_as_u64: u64 = stable_value as u64;
