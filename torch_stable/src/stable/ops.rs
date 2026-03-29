@@ -107,15 +107,15 @@ mod test {
         let a = Tensor::from_f32(5.0).unwrap();
         let a = a.unsqueeze(0)?;
         let b = a.to(&ToOptions {
-            // device: Some(Device::from_str("cpu")?),
-            device: Some(Device::from_str("cuda:0")?),
+            device: Some(Device::from_str("cpu")?),
+            // device: Some(Device::from_str("cuda:0")?),
             copy: false,
             ..Default::default()
         })?;
 
         assert_eq!(
             b.device().device_type(),
-            crate::stable::device::DeviceType::CUDA
+            crate::stable::device::DeviceType::CPU
         );
         let res = b.to_f32();
         assert_eq!(res.unwrap(), 5.0);

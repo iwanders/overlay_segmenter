@@ -27,7 +27,7 @@
 //   new StableIValue is not portable, malloc != new? It's complex, valgrind lights up.
 //   Why are sizes i64s? Same with enums being i32s?
 //   Why doesn't ops have add? I tried a dispatch, but we can't because of the scalar value in the signature I think? See contrib.
-//
+//   Optional arguments for kernel launches are not supported it seems? https://github.com/pytorch/pytorch/blob/v2.11.0/torch/csrc/shim_common.cpp#L542-L545
 
 pub mod aoti_torch;
 pub mod contrib;

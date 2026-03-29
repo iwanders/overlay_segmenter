@@ -82,7 +82,7 @@ impl Math for Tensor {
         }
     }
     fn sub2(&self, other: &Tensor) -> StableTorchResult<Tensor> {
-        let mut stack: [StableIValue; 2] = [self.into(), other.into()];
+        let mut stack: [StableIValue; 3] = [self.into(), other.into(), 0.into()];
         unsafe_call_dispatch_bail!("aten::subtract", "Tensor", stack.as_mut_slice()); // does something, mostly complain about scalars
 
         stack[0].try_into()

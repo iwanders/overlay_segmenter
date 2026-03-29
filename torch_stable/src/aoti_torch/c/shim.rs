@@ -188,13 +188,15 @@ unsafe extern "C" {
     // https://github.com/pytorch/pytorch/blob/f2b47323ac2c438722c2db58aa31d9222676509d/torch/csrc/inductor/aoti_torch/c/shim.h#L345
     pub unsafe fn aoti_torch_new_uninitialized_tensor(ret: &mut AtenTensorHandle)
     -> AOTITorchError;
+
+    pub unsafe fn aoti_torch_new_stable_ivalue(ret_value: *mut *mut StableIValue);
 }
 
 // https://github.com/pytorch/pytorch/blob/3848e11d554a7f49925b593c40b8be0b86ac6b3f/docs/source/notes/libtorch_stable_abi.md#stableivalue-conversions
 
 // https://github.com/pytorch/pytorch/blob/3848e11d554a7f49925b593c40b8be0b86ac6b3f/torch/csrc/inductor/aoti_torch/c/shim.h#L485-L486
 // pub type StableIValue = u64;
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 #[repr(transparent)]
 pub struct StableIValue(pub u64);
 impl std::fmt::Debug for StableIValue {
