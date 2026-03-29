@@ -4,36 +4,11 @@ use super::tensor::Tensor;
 use crate::aoti_torch::*;
 use crate::headeronly::core::{Layout, MemoryFormat, ScalarType};
 use crate::stable::c::*;
-use crate::{StableTorchResult, unsafe_call_bail};
+use crate::{StableTorchResult, unsafe_call_bail, unsafe_call_dispatch_bail};
 
-// This is a macro mostly to ensure we have the correct line number and file :/
-macro_rules! unsafe_call_dispatch_bail {
-    ($op_name:expr, $overload_name:expr, $stack:expr) => {{
-        let op_name = std::ffi::CString::new($op_name).expect("CString::new failed");
-        let op_name_cstr = op_name.as_ptr();
-
-        let overload_name = std::ffi::CString::new($overload_name).expect("CString::new failed");
-        let overload_name_cstr = overload_name.as_ptr();
-
-        let api_call_result = unsafe {
-            torch_call_dispatcher(
-                op_name_cstr,
-                overload_name_cstr,
-                $stack.as_mut_ptr(),
-                crate::TORCH_ABI_VERSION,
-            )
-        };
-        if api_call_result == crate::AOTI_TORCH_FAILURE {
-            anyhow::bail!(
-                "dispatch failed ({}, {}) at {}:{}",
-                $op_name,
-                $overload_name,
-                file!(),
-                line!()
-            );
-        }
-    }};
-}
+// Dispatch through?
+// https://github.com/pytorch/pytorch/blob/v2.11.0/aten/src/ATen/native/native_functions.yaml
+//
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct ToOptions {

@@ -28,5 +28,35 @@ macro_rules! unsafe_call_panic {
     }};
 }
 
+// This is a macro mostly to ensure we have the correct line number and file :/
+macro_rules! unsafe_call_dispatch_bail {
+    ($op_name:expr, $overload_name:expr, $stack:expr) => {{
+        let op_name = std::ffi::CString::new($op_name).expect("CString::new failed");
+        let op_name_cstr = op_name.as_ptr();
+
+        let overload_name = std::ffi::CString::new($overload_name).expect("CString::new failed");
+        let overload_name_cstr = overload_name.as_ptr();
+
+        let api_call_result = unsafe {
+            crate::stable::c::torch_call_dispatcher(
+                op_name_cstr,
+                overload_name_cstr,
+                $stack.as_mut_ptr(),
+                crate::TORCH_ABI_VERSION,
+            )
+        };
+        if api_call_result == crate::AOTI_TORCH_FAILURE {
+            anyhow::bail!(
+                "dispatch failed ({}, {}) at {}:{}",
+                $op_name,
+                $overload_name,
+                file!(),
+                line!()
+            );
+        }
+    }};
+}
+
 pub(crate) use unsafe_call_bail;
+pub(crate) use unsafe_call_dispatch_bail;
 pub(crate) use unsafe_call_panic;

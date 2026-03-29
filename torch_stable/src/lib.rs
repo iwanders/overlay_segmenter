@@ -26,6 +26,8 @@
 //   Lack of retrieving error messages, or even disabling the c++ backtrace.
 //   new StableIValue is not portable, malloc != new? It's complex, valgrind lights up.
 //   Why are sizes i64s? Same with enums being i32s?
+//   Why doesn't ops have add? I tried a dispatch, but we can't because of the scalar value in the signature I think? See contrib.
+//
 
 pub mod aoti_torch;
 pub mod contrib;
@@ -39,7 +41,7 @@ use aoti_torch::*;
 // Output param: &mut AtenTensorHandle
 
 pub use util::StableTorchResult;
-pub(crate) use util::{unsafe_call_bail, unsafe_call_panic};
+pub(crate) use util::{unsafe_call_bail, unsafe_call_dispatch_bail, unsafe_call_panic};
 
 #[cfg(test)]
 pub(crate) const RUN_SPAMMY_TESTS: bool = false;
