@@ -11,6 +11,7 @@ use crate::{
     headeronly::core::{DeviceType, Layout, MemoryFormat, ScalarType},
     stable::{
         device::{Device, DeviceIndex},
+        scalar::Scalar,
         tensor::Tensor,
     },
     unsafe_call_panic,
@@ -40,13 +41,21 @@ where
                 let value_u64: u64 = converted.0;
                 // println!("vvalue_u64 : {value_u64:x?}");
                 // if true
+                // {
+                //     let raw_malloc_ptr_u64 =
+                //         unsafe { crate::support::iw_stable_torch_alloc_stableivalue() };
+                //     unsafe { *raw_malloc_ptr_u64 = value_u64 };
+                //     let ptr_as_u64: u64 = raw_malloc_ptr_u64 as u64;
+                //     StableIValue(ptr_as_u64)
+                // }
+
                 {
-                    let raw_malloc_ptr_u64 =
-                        unsafe { crate::support::iw_stable_torch_alloc_stableivalue() };
-                    unsafe { *raw_malloc_ptr_u64 = value_u64 };
-                    let ptr_as_u64: u64 = raw_malloc_ptr_u64 as u64;
+                    let mut handle_res: *mut StableIValue = std::ptr::null_mut();
+                    unsafe { aoti_torch_new_stable_ivalue(&mut handle_res) };
+                    let ptr_as_u64: u64 = handle_res as u64;
                     StableIValue(ptr_as_u64)
                 }
+
                 /* else if false {
                 let boxed_stable_value: Box<u64> = Box::new(value_u64);
                 let stable_value = Box::into_raw(boxed_stable_value);
@@ -181,6 +190,21 @@ impl From<DeviceIndex> for StableIValue {
     fn from(value: DeviceIndex) -> Self {
         let bitwise_value: u64 = u32::from_ne_bytes((value.0 as i32).to_ne_bytes()) as u64;
         Self(bitwise_value)
+    }
+}
+
+impl From<Scalar> for StableIValue {
+    fn from(value: Scalar) -> Self {
+        let mut handle_res: StableListHandle = std::ptr::null_mut();
+        unsafe_call_panic!(torch_new_list_reserve_size(2, &mut handle_res));
+
+        let scalar_type = value.scalar_type();
+        let scalar_value = value.value();
+
+        unsafe_call_panic!(torch_list_push_back(handle_res, scalar_type.into()));
+        unsafe_call_panic!(torch_list_push_back(handle_res, scalar_value.into()));
+
+        Self(handle_res as u64)
     }
 }
 
