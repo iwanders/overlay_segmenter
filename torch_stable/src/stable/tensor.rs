@@ -121,8 +121,6 @@ impl Tensor {
         return is_defined;
     }
 
-    // storage_offset, element_size
-
     pub fn scalar_type(&self) -> ScalarType {
         let mut dtype: i32 = 0;
         unsafe_call_panic!(aoti_torch_get_dtype(self.get(), &mut dtype));
@@ -204,6 +202,7 @@ impl Tensor {
 
 #[cfg(test)]
 mod test {
+
     use super::*;
     #[test]
     fn test_tensor_uninitialised() {
@@ -218,5 +217,6 @@ mod test {
         assert_eq!(t.defined(), false);
         assert_eq!(t.scalar_type(), ScalarType::Undefined);
         // assert_eq!(t.device(), Device::from_str("cpu").unwrap());
+        // device: Some(Device::from_str("cuda:0")?),
     }
 }

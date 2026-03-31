@@ -17,6 +17,8 @@
 // stack[0].try_into()
 //
 
+use anyhow::bail;
+
 use crate::aoti_torch::AtenTensorHandle;
 use crate::stable::scalar::Scalar;
 use crate::stable::tensor::Tensor;
@@ -101,20 +103,29 @@ impl Manipulation for Tensor {
         let element_size = self.element_size();
         let elements = self.numel();
         let data_ptr = self.const_data_ptr();
-        Ok(unsafe { std::slice::from_raw_parts(data_ptr, elements * element_size) })
+        if self.is_cpu() {
+            Ok(unsafe { std::slice::from_raw_parts(data_ptr, elements * element_size) })
+        } else {
+            bail!("tensor must be on cpu to access slice")
+        }
     }
 
     fn data_mut(&self) -> StableTorchResult<&mut [u8]> {
         let element_size = self.element_size();
         let elements = self.numel();
         let data_ptr = self.mutable_data_ptr();
-        Ok(unsafe { std::slice::from_raw_parts_mut(data_ptr, elements * element_size) })
+        if self.is_cpu() {
+            Ok(unsafe { std::slice::from_raw_parts_mut(data_ptr, elements * element_size) })
+        } else {
+            bail!("tensor must be on cpu to access slice")
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::stable::ops::ToOptions;
 
     use crate::headeronly::core::ScalarType;
 
@@ -177,6 +188,20 @@ mod test {
         a.data_mut()?[0] = 3;
         println!("a.data_ref(): {:?}", a.data_ref()?);
         assert_eq!(a.data_ref()?, &[3, 0, 160, 64]);
+
+        #[cfg(not(feature = "use_torch_devel"))]
+        {
+            let b = a.to(&ToOptions {
+                // device: Some(Device::from_str("cpu")?),
+                device: Some(Device::from_str("cuda:0")?),
+                copy: false,
+                ..Default::default()
+            })?;
+            println!("b.data_ptr: {:?}", b.data_ptr());
+            println!("b.const_data_ptr: {:?}", b.const_data_ptr());
+            println!("b.mutable_data_ptr: {:?}", b.mutable_data_ptr());
+            assert_eq!(b.data_mut().is_err(), true);
+        }
         Ok(())
     }
 }
