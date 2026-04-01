@@ -14,9 +14,10 @@
 mod data_generator {
     use super::*;
     use pyo3::prelude::*;
-    use tch::Tensor;
+    // use tch::Tensor;
+    use torch_stable::stable::tensor::Tensor;
 
-    struct TensorWrapper(Tensor);
+    struct TensorWrapper();
     unsafe impl Sync for TensorWrapper {}
 
     #[pyclass]
@@ -36,7 +37,7 @@ mod data_generator {
     fn make_tensor() -> PyResult<MyClass> {
         Ok(MyClass {
             inner: 5,
-            t: TensorWrapper(Tensor::from_slice(&[3, 1, 4, 1, 5])),
+            t: TensorWrapper(), // Tensor::from_slice(&[3, 1, 4, 1, 5])
         })
     }
 }
