@@ -10,6 +10,8 @@ license = "BSD-3-Clause"
 [dependencies]
 libc = "0.2.183"
 anyhow = "1.0.102"
+zerocopy = "0.8.48"
+
 [build-dependencies]
 cc = "1.0"
 

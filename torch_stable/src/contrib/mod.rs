@@ -96,6 +96,8 @@ impl Math for Tensor {
 pub trait Manipulation {
     fn data_ref(&self) -> StableTorchResult<&[u8]>;
     fn data_mut(&self) -> StableTorchResult<&mut [u8]>;
+    fn f32_ref(&self) -> StableTorchResult<&[f32]>;
+    fn f32_mut(&self) -> StableTorchResult<&mut [f32]>;
 }
 
 impl Manipulation for Tensor {
@@ -120,12 +122,29 @@ impl Manipulation for Tensor {
             bail!("tensor must be on cpu to access slice")
         }
     }
+
+    fn f32_ref(&self) -> StableTorchResult<&[f32]> {
+        let byte_ref = self.data_ref()?;
+        use zerocopy::TryFromBytes;
+        match <[f32]>::try_ref_from_bytes(byte_ref) {
+            Ok(e) => Ok(e),
+            Err(z) => bail!("failed slice conversion: {z:?}"),
+        }
+    }
+    fn f32_mut(&self) -> StableTorchResult<&mut [f32]> {
+        let byte_ref = self.data_mut()?;
+        use zerocopy::TryFromBytes;
+        match <[f32]>::try_mut_from_bytes(byte_ref) {
+            Ok(e) => Ok(e),
+            Err(z) => bail!("failed slice conversion: {z:?}"),
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::stable::ops::ToOptions;
+    use crate::stable::ops::{EmtpyOptions, ToOptions};
 
     use crate::headeronly::core::ScalarType;
 
@@ -202,6 +221,27 @@ mod test {
             println!("b.mutable_data_ptr: {:?}", b.mutable_data_ptr());
             assert_eq!(b.data_mut().is_err(), true);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn test_tensor_contrib_f32() -> StableTorchResult<()> {
+        let t = Tensor::empty(
+            &[2, 2],
+            &EmtpyOptions {
+                dtype: Some(ScalarType::Float),
+                ..Default::default()
+            },
+        )?;
+        println!("t.data_ptr: {:?}", t.data_ptr());
+        println!("t.const_data_ptr: {:?}", t.const_data_ptr());
+        println!("t.mutable_data_ptr: {:?}", t.mutable_data_ptr());
+        println!("t.f32_ref(): {:?}", t.f32_ref()?);
+        t.f32_mut()?[0] = 3.3;
+        t.f32_mut()?[1] = 5.3;
+        t.f32_mut()?[2] = 89.5;
+        println!("t.f32_ref(): {:?}", t.f32_ref()?);
+
         Ok(())
     }
 }
