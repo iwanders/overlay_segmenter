@@ -20,6 +20,7 @@
 use anyhow::bail;
 
 use crate::aoti_torch::AtenTensorHandle;
+use crate::headeronly::core::ScalarType;
 use crate::stable::ops::EmtpyOptions;
 use crate::stable::scalar::Scalar;
 use crate::stable::tensor::Tensor;
@@ -109,7 +110,7 @@ pub trait DataManipulation {
     fn f32_mut(&self) -> StableTorchResult<&mut [f32]>;
 
     fn t_ref<T: IntoBytes + TryFromBytes + Immutable>(&self) -> StableTorchResult<&[T]>;
-    fn t_mut<T: IntoBytes + TryFromBytes + Immutable>(&self) -> StableTorchResult<&mut [T]>;
+    fn t_mut<T: IntoBytes + TryFromBytes + Immutable>(&mut self) -> StableTorchResult<&mut [T]>;
 }
 
 impl DataManipulation for Tensor {
@@ -157,7 +158,7 @@ impl DataManipulation for Tensor {
             Err(z) => bail!("failed slice conversion: {z:?}"),
         }
     }
-    fn t_mut<T: IntoBytes + TryFromBytes + Immutable>(&self) -> StableTorchResult<&mut [T]> {
+    fn t_mut<T: IntoBytes + TryFromBytes + Immutable>(&mut self) -> StableTorchResult<&mut [T]> {
         let byte_ref = self.data_mut()?;
         match <[T]>::try_mut_from_bytes(byte_ref) {
             Ok(e) => Ok(e),
@@ -185,6 +186,39 @@ impl Creation for Tensor {
         unsafe_call_bail!(aoti_torch_zero_(r.get()));
 
         Ok(r)
+    }
+}
+
+pub trait Arange {
+    fn arange_u64(start: u64, end: u64, step: u64) -> StableTorchResult<Tensor>;
+}
+// Should we just pull in num traits here?
+impl Arange for Tensor {
+    fn arange_u64(start: u64, end: u64, step: u64) -> StableTorchResult<Tensor> {
+        // This is all on the cpu... but we can also use a kernel;
+        // https://github.com/pytorch/pytorch/blob/v2.11.0/aten/src/ATen/native/native_functions.yaml#L795
+
+        let options: EmtpyOptions = EmtpyOptions {
+            dtype: Some(ScalarType::UInt64),
+            ..Default::default()
+        };
+        let mut v = Tensor::zeros(&[((end - start) / step) as usize], &options)?;
+        let mut value = start;
+        for i in 0..v.sizes()[0] {
+            v.t_mut::<u64>()?[i] = value;
+            value += step;
+        }
+        Ok(v)
+    }
+}
+
+pub trait Indexing<T> {
+    fn i(&self, i: T) -> StableTorchResult<Tensor>;
+}
+
+impl Indexing<std::ops::Range<usize>> for Tensor {
+    fn i(&self, i: std::ops::Range<usize>) -> StableTorchResult<Tensor> {
+        todo!()
     }
 }
 
@@ -321,6 +355,15 @@ mod test {
         println!("before: b.f32_ref(): {:?}", b.f32_ref()?);
         t.f32_mut()?[3] = 10000.5;
         println!("after   b.f32_ref(): {:?}", b.f32_ref()?);
+
+        Ok(())
+    }
+    #[test]
+    fn test_tensor_contrib_arange() -> StableTorchResult<()> {
+        let t = Tensor::arange_u64(0, 24, 1)?;
+        assert_eq!(t.dim(), 1); // torch.arange(0, 24).dim()
+        assert_eq!(t.sizes(), &[24]); // torch.arange(0, 24).shape
+        assert!(t.t_ref::<u64>()?.iter().zip(0..24u64).all(|(a, b)| *a == b));
 
         Ok(())
     }
