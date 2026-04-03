@@ -25,7 +25,7 @@ fn main() {
     // Tell cargo to tell rustc to link the system bzip2
     // shared library.
     // println!("cargo:rustc-link-lib=torch");
-    // println!("cargo:rustc-link-lib=torch_cuda");
+    println!("cargo:rustc-link-lib=torch_cuda");
     println!("cargo:rustc-link-lib=torch_cpu");
     // println!("cargo:rustc-link-lib=static:+whole-archive,-bundle=torch_cuda");
     //

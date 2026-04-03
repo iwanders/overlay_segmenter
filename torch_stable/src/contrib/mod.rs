@@ -85,10 +85,11 @@ impl Math for Tensor {
             let mut handle_res: AtenTensorHandle = std::ptr::null_mut();
 
             // Yes, this is a subtract with self - alpha * other with alpha = -1.0.
-            unsafe_call_bail!(aoti_torch_aten_subtract_Tensor(
+            // unsafe_call_bail!(aoti_torch_cpu_add_Tensor(
+            unsafe_call_bail!(aoti_torch_cuda_add_Tensor(
                 self.get(),
                 other.get(),
-                -1.0,
+                1.0,
                 &mut handle_res
             ));
             Ok(Self::from_handle(handle_res))
@@ -259,6 +260,26 @@ mod test {
         use crate::contrib::{FromScalar, ToScalar};
         let a = Tensor::from_f32(5.0)?;
         let b = Tensor::from_f32(3.0)?;
+        let c = a.add(&b)?;
+        assert_eq!(c.to_f32().unwrap(), 8.0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_tensor_contrib_addition_cuda() -> StableTorchResult<()> {
+        use crate::contrib::{FromScalar, ToScalar};
+        let a = Tensor::from_f32(5.0)?.unsqueeze(0)?;
+        let b = Tensor::from_f32(3.0)?.unsqueeze(0)?;
+        let a = a.to(&ToOptions {
+            device: Some(Device::from_str("cuda:0")?),
+            copy: true,
+            ..Default::default()
+        })?;
+        let b = b.to(&ToOptions {
+            device: Some(Device::from_str("cuda:0")?),
+            copy: true,
+            ..Default::default()
+        })?;
         let c = a.add(&b)?;
         assert_eq!(c.to_f32().unwrap(), 8.0);
         Ok(())
