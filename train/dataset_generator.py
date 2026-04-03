@@ -80,18 +80,21 @@ class DatasetGenerator:
             left:right,
         ]
         # print("load load_background_image", type(image))
+        # Background images may have an alpha channel, but we don't want that.
+        if image.shape[0] == 4:
+            image = image[0:3, :, :]
         return image
 
     def load_images(self):
         count = 0
-        for f in self._background_dir.iterdir():
+        for f in self._background_dir.rglob("*.png"):
             background_image = self.load_background_image(f)
             self._background_images.append(background_image)
             count += 1
             if count > self._limit:
                 break
         count = 0
-        for f in self._foreground_dir.iterdir():
+        for f in self._foreground_dir.rglob("*.png"):
             self._foreground_images.append(self.load_image(f))
             count += 1
             if count > self._limit:
@@ -161,7 +164,7 @@ class DatasetGenerator:
             mask = fg_alpha >= 0.5
             # combined = torch.from_numpy(combined)
             mask = mask.to(torch.int64).squeeze()
-            combined = augment_jpg_roundtrip(combined, quality=20)
+            # combined = augment_jpg_roundtrip(combined, quality=20)
             return (combined, mask)
 
         threaded = False
