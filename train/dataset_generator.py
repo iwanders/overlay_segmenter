@@ -28,8 +28,15 @@ def alpha_blend(fg, bg, alpha):
     return bg + alpha * (fg - bg)
 
 
+def rng_choice(rng, container):
+    i = rng.integers(0, high=len(container))
+    return container[i]
+
+
 class DatasetGenerator:
-    def __init__(self, background_dir, foreground_dir, limit=float("inf")):
+    def __init__(
+        self, background_dir, foreground_dir, limit=float("inf"), device="cpu"
+    ):
         self._background_dir = Path(background_dir)
         self._foreground_dir = Path(foreground_dir)
         self._background_crop_top_left = (105, 27)
@@ -38,11 +45,13 @@ class DatasetGenerator:
         self._background_images = []
         self._foreground_images = []
         self._limit = limit
+        self._device = device
         self.load_images()
 
     def load_image(self, d):
         image = Image.open(d)
         image = ToTensor()(image)
+        image = image.to(self._device)
         # print("load image", type(image))
         return image
 
@@ -78,12 +87,16 @@ class DatasetGenerator:
         output = Path("/tmp/debug_dump")
         output.mkdir(exist_ok=True)
 
+        print("Generating")
+        generated = self.generate(count=1000)
+        print("done generating")
+
         for i, img in enumerate(self._background_images):
             torchvision.utils.save_image(img, output / f"background_{i}.png")
         for i, img in enumerate(self._foreground_images):
             torchvision.utils.save_image(img, output / f"foreground_{i}.png")
 
-        for i, (sample_img, sample_mask) in enumerate(self.generate(count=1000)):
+        for i, (sample_img, sample_mask) in enumerate(generated):
             torchvision.utils.save_image(sample_img, output / f"sample_{i}_img.png")
             torchvision.utils.save_image(
                 sample_mask.to(torch.float), output / f"sample_{i}_mask.png"
@@ -112,8 +125,8 @@ class DatasetGenerator:
         rng = np.random.default_rng(seed=seed)
 
         def create_tile(rng):
-            bg = rng.choice(self._background_images)
-            fg = rng.choice(self._foreground_images)
+            bg = rng_choice(rng, self._background_images)
+            fg = rng_choice(rng, self._foreground_images)
             # Next, sample a tile from this.
             bg_tile = DatasetGenerator.sample_tile(bg, tile_size=tile_size, rng=rng)
             fg_tile = DatasetGenerator.sample_tile(fg, tile_size=tile_size, rng=rng)
@@ -124,8 +137,8 @@ class DatasetGenerator:
             # Now, we perform the blit to create the combined texture....
             combined = alpha_blend(fg_rgb, bg_tile, alpha=fg_alpha * alpha_factor)
             mask = fg_alpha >= 0.5
-            combined = torch.from_numpy(combined)
-            mask = torch.from_numpy(mask).to(torch.int64).squeeze()
+            # combined = torch.from_numpy(combined)
+            mask = mask.to(torch.int64).squeeze()
             return (combined, mask)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
@@ -141,5 +154,7 @@ class DatasetGenerator:
 if __name__ == "__main__":
     background_dir = "../../datasets/background/cave/"
     foreground_dir = "../../datasets/foreground/cave/"
-    d = DatasetGenerator(background_dir, foreground_dir=foreground_dir, limit=2)
+    d = DatasetGenerator(
+        background_dir, foreground_dir=foreground_dir, limit=2, device="cuda:0"
+    )
     d.debug_dump()
