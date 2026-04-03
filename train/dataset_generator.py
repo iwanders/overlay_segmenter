@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torchvision
 from PIL import Image
+from torchvision.io import decode_jpeg, encode_jpeg
 from torchvision.transforms import ToTensor
 
 
@@ -27,6 +28,18 @@ def alpha_blend(fg, bg, alpha):
     # Formula: BG * (1 - alpha) + FG * alpha
     # Or simplified: bg + alpha * (fg - bg)
     return bg + alpha * (fg - bg)
+
+
+def augment_jpg_roundtrip(img, quality=20):
+    desired_device = img.device
+    # print(desired_device)
+    # Go from floats to u8
+    img = (img * 255.0).to(dtype=torch.uint8).to("cpu")
+    # print(img)
+    encoded = encode_jpeg(img, quality=quality)
+    # print(encoded)
+    # print(desired_device)
+    return (decode_jpeg(encoded)).to(dtype=torch.float, device=desired_device) / 255.0
 
 
 def rng_choice(rng, container):
@@ -90,7 +103,13 @@ class DatasetGenerator:
 
         print("Generating")
         start = time.time()
-        generated = self.generate(count=100)
+        generated = [
+            (
+                augment_jpg_roundtrip(a),
+                b,
+            )
+            for a, b in self.generate(count=10)
+        ]
         print("done generating")
         print(f"took {time.time() - start} s")
 
@@ -142,6 +161,7 @@ class DatasetGenerator:
             mask = fg_alpha >= 0.5
             # combined = torch.from_numpy(combined)
             mask = mask.to(torch.int64).squeeze()
+            combined = augment_jpg_roundtrip(combined, quality=20)
             return (combined, mask)
 
         threaded = False
