@@ -2,6 +2,7 @@
 #
 
 import concurrent.futures
+import time
 from pathlib import Path
 
 import numpy as np
@@ -88,8 +89,10 @@ class DatasetGenerator:
         output.mkdir(exist_ok=True)
 
         print("Generating")
-        generated = self.generate(count=1000)
+        start = time.time()
+        generated = self.generate(count=100)
         print("done generating")
+        print(f"took {time.time() - start} s")
 
         for i, img in enumerate(self._background_images):
             torchvision.utils.save_image(img, output / f"background_{i}.png")
@@ -141,9 +144,17 @@ class DatasetGenerator:
             mask = mask.to(torch.int64).squeeze()
             return (combined, mask)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            rngs = [np.random.default_rng(seed=seed + t) for t in range(count)]
-            results = list(executor.map(create_tile, rngs))
+        threaded = False
+        if threaded:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                rngs = [np.random.default_rng(seed=seed + t) for t in range(count)]
+                results = list(executor.map(create_tile, rngs))
+        else:
+            results = list(
+                create_tile(r)
+                for r in (np.random.default_rng(seed=seed + t) for t in range(count))
+            )
+
         # results = [
         #    create_tile(z)
         #    for z in list(np.random.default_rng(seed=seed + t) for t in range(count))
