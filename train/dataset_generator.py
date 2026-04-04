@@ -58,7 +58,6 @@ class ImageLoader:
         remove_alpha=False,
     ):
         self._crop_top_left = crop_top_left
-        print(self._crop_top_left)
         self._crop_size = crop_size
         self._images = []
         self._device = device
@@ -123,35 +122,17 @@ class ImageLoader:
 class DatasetGenerator:
     def __init__(
         self,
-        background_dir=None,
-        foreground_dir=None,
-        limit=float("inf"),
+        background_images: list[Tensor],
+        foreground_images: list[Tensor],
         device="cpu",
-        batch_size=None,
-        batch_count=None,
+        batch_size: int | None = None,
+        batch_count: int | None = None,
     ):
-        self._limit = limit
         self._device = device
-        self._batch_size = batch_size
-        self._batch_count = batch_count
-        self._background_images = []
-        self._foreground_images = []
-        if background_dir and foreground_dir:
-            self.load_images(
-                foreground_dir=Path(foreground_dir), background_dir=Path(background_dir)
-            )
-
-    @staticmethod
-    def combine(
-        generators,
-        **kwargs,
-    ):
-        n = DatasetGenerator(**kwargs)
-        for g in generators:
-            n._background_images.extend([t.to(n._device) for t in g._background_images])
-            n._foreground_images.extend([t.to(n._device) for t in g._foreground_images])
-
-        return n
+        self._batch_size: int | None = batch_size
+        self._batch_count: int | None = batch_count
+        self._background_images = [a.to(device) for a in background_images]
+        self._foreground_images = [a.to(device) for a in foreground_images]
 
     def debug_dump(self):
         output = Path("/tmp/debug_dump")
@@ -258,17 +239,18 @@ if __name__ == "__main__":
     background_dir = "../../datasets/background/cave/"
     foreground_dir = "../../datasets/foreground/cave/"
 
-    l = ImageLoader.background_loader(Path(background_dir))
-    print(l.images())
-    print(l.images()[0].shape)
-    print(l)
+    background_images = ImageLoader.background_loader(Path(background_dir))
+    foreground_images = ImageLoader.foreground_loader(Path(foreground_dir))
 
     d = DatasetGenerator(
-        background_dir, foreground_dir=foreground_dir, limit=2, device="cuda:0"
+        background_images=background_images.images(),
+        foreground_images=foreground_images.images(),
+        device="cuda:0",
     )
     d.debug_dump()
 
     d.set_batch_size(4)
+    d.set_batch_count(4)
 
     # data <class 'list'>
     # inputs <class 'torch.Tensor'> torch.Size([4, 3, 256, 256])
