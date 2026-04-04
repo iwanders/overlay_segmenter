@@ -48,6 +48,12 @@ def rng_choice(rng, container):
     return container[i]
 
 
+def rng_shuffle(rng, container):
+    shuffled_i = list(range(len(container)))
+    rng.shuffle(shuffled_i)
+    return [container[i] for i in shuffled_i]
+
+
 class ImageLoader:
     def __init__(
         self,
@@ -127,12 +133,20 @@ class DatasetGenerator:
         device="cpu",
         batch_size: int | None = None,
         batch_count: int | None = None,
+        rng: np.random.Generator | None = None,
+        tile_size=(256, 256),
+        alpha_factor=1.0,
     ):
         self._device = device
         self._batch_size: int | None = batch_size
         self._batch_count: int | None = batch_count
         self._background_images = [a.to(device) for a in background_images]
         self._foreground_images = [a.to(device) for a in foreground_images]
+        self._rng = rng
+        self._tile_size = tile_size
+        self._alpha_factor = alpha_factor
+        if self._rng is None:
+            self._rng = np.random.default_rng()
 
     def debug_dump(self):
         output = Path("/tmp/debug_dump")
@@ -179,43 +193,36 @@ class DatasetGenerator:
         return img[:, x : x + tile_size[0], y : y + tile_size[1]]
         # return img[:, y : y + tile_size[1], x : x + tile_size[0]]
 
-    def generate(self, count=1, tile_size=(256, 256), seed=1, alpha_factor=1.0):
+    def generate(self, count=1):
         results = []
-        rng = np.random.default_rng(seed=seed)
 
         def create_tile(rng):
             bg = rng_choice(rng, self._background_images)
             fg = rng_choice(rng, self._foreground_images)
             # Next, sample a tile from this.
-            bg_tile = DatasetGenerator.sample_tile(bg, tile_size=tile_size, rng=rng)
-            fg_tile = DatasetGenerator.sample_tile(fg, tile_size=tile_size, rng=rng)
+            bg_tile = DatasetGenerator.sample_tile(
+                bg, tile_size=self._tile_size, rng=rng
+            )
+            fg_tile = DatasetGenerator.sample_tile(
+                fg, tile_size=self._tile_size, rng=rng
+            )
 
             fg_rgb = fg_tile[:3]
             fg_alpha = fg_tile[3:]  # (1, H, W)
 
             # Now, we perform the blit to create the combined texture....
-            combined = alpha_blend(fg_rgb, bg_tile, alpha=fg_alpha * alpha_factor)
+            combined = alpha_blend(fg_rgb, bg_tile, alpha=fg_alpha * self._alpha_factor)
             mask = fg_alpha >= 0.5
             # combined = torch.from_numpy(combined)
             mask = mask.to(torch.int64).squeeze()
             # combined = augment_jpg_roundtrip(combined, quality=20)
             return (combined, mask)
 
-        threaded = False
-        if threaded:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                rngs = [np.random.default_rng(seed=seed + t) for t in range(count)]
-                results = list(executor.map(create_tile, rngs))
-        else:
-            results = list(
-                create_tile(r)
-                for r in (np.random.default_rng(seed=seed + t) for t in range(count))
-            )
+        # with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        #     rngs = [np.random.default_rng(seed=seed + t) for t in range(count)]
+        #     results = list(executor.map(create_tile, rngs))
+        results = [create_tile(self._rng) for t in range(count)]
 
-        # results = [
-        #    create_tile(z)
-        #    for z in list(np.random.default_rng(seed=seed + t) for t in range(count))
-        # ]
         return results
 
     def set_batch_size(self, batch_size):
@@ -224,10 +231,17 @@ class DatasetGenerator:
     def set_batch_count(self, batch_count):
         self._batch_count = batch_count
 
+
+class DynamicGenerator:
+    def __init__(self, generator, batch_count=20, batch_size=4):
+        self._generator = generator
+        self._batch_count = batch_count
+        self._batch_size = batch_size
+
     def __iter__(self):
         def gen():
             for i in range(self._batch_count):
-                g = self.generate(self._batch_size)
+                g = self._generator.generate(self._batch_size)
                 d = torch.cat([z[0].unsqueeze(0) for z in g], dim=0)
                 m = torch.cat([z[1].unsqueeze(0) for z in g], dim=0)
                 yield (d, m)

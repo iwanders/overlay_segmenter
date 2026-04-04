@@ -5,11 +5,16 @@
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import torch
 import torchvision
 
-from dataset_generator import DatasetGenerator
-from drive_loader import load_drive_dataset
+from dataset_generator import (
+    DatasetGenerator,
+    DynamicGenerator,
+    ImageLoader,
+    rng_shuffle,
+)
 from model import Unet
 
 if torch.cuda.is_available():
@@ -21,43 +26,62 @@ else:
 
 print(f"Using device: {device}")
 
-train, test = load_drive_dataset(device=device)
-
-
-training_set = [(a.image, a.manual1) for a in train]
-validation_set = [(a.image, a.manual1) for a in train + test]
 
 # Currently, tile size needs to be smaller than the overlay tiles.
 # tile_size = (400, 400)
 tile_size = (256, 256)
+alpha_factor = 0.5
 
-
-training_set = []
+# training_set = []
 validation_set = []
 
 training_generators = []
 
-if True:
-    for tileset in ["cave", "barracks"]:
-        background_dir = f"../../datasets/background/{tileset}/"
-        foreground_dir = f"../../datasets/foreground/{tileset}/"
-        d = DatasetGenerator(background_dir, foreground_dir=foreground_dir)
-        training_set.extend(
-            d.generate(count=100, tile_size=tile_size, seed=34234233, alpha_factor=0.5)
-        )
-        training_generators.append(d)
-        validation_set.extend(
-            d.generate(count=30, tile_size=tile_size, seed=2, alpha_factor=0.5)
-        )
-    # validation_set = validation_set
+
+background_dir = Path("../../datasets/background/")
+foreground_dir = Path("../../datasets/foreground/")
+
+background_images = []
+foreground_images = []
+
+for tileset in ["cave", "barracks"]:
+    background_images.extend(
+        ImageLoader.background_loader(background_dir / tileset).images()
+    )
+    foreground_images.extend(
+        ImageLoader.foreground_loader(foreground_dir / tileset).images()
+    )
+
+
+rng = np.random.default_rng(seed=3)
+background_images = rng_shuffle(rng, background_images)
+foreground_images = rng_shuffle(rng, foreground_images)
+
+
+total_bg = len(background_images)
+validation_bg_split = int(total_bg * 0.1)
+validation_bg = background_images[0:validation_bg_split]
+train_bg = background_images[validation_bg_split + 1 :]
+print(f"Validation bgs: {len(validation_bg)}")
+print(f"Train bgs: {len(train_bg)}")
+
+validation_set = []
+validation_generator = DatasetGenerator(
+    background_images=validation_bg,
+    foreground_images=foreground_images,
+    device=device,
+    rng=rng,
+    tile_size=tile_size,
+    alpha_factor=alpha_factor,
+)
+validation_set.extend(
+    validation_generator.generate(
+        count=30,
+    )
+)
 
 
 if True:
-    for i, (img, mask) in enumerate(training_set):
-        epoch_dir = Path("/tmp/train/")
-        epoch_dir.mkdir(exist_ok=True, parents=True)
-        out_path = epoch_dir / f"train_{i:0>3}.png"
-        torchvision.utils.save_image([img, torch.stack([mask, mask, mask])], out_path)
     for i, (img, mask) in enumerate(validation_set):
         epoch_dir = Path("/tmp/train/")
         epoch_dir.mkdir(exist_ok=True, parents=True)
@@ -65,28 +89,32 @@ if True:
         torchvision.utils.save_image([img, torch.stack([mask, mask, mask])], out_path)
 
 
-training_set = [(a.to(device), b.to(device)) for a, b in training_set]
-validation_set = [(a.to(device), b.to(device)) for a, b in validation_set]
-
-
 BATCH_SIZE_LOOKUP = {
     (3, 256, 256): 12,  # 6.9 GB of vram
 }
-resolution = tuple(training_set[0][0].shape)
+resolution = tuple(validation_set[0][0].shape)
 batch_size = BATCH_SIZE_LOOKUP.get(resolution, 4)
 # Larger batches (no change to learning rate) is not actually better?
 batch_size = 4
 
 # Create data loaders for our datasets; shuffle for training, not for validation
-training_loader = torch.utils.data.DataLoader(
-    training_set, batch_size=batch_size, shuffle=True
-)
 validation_loader = torch.utils.data.DataLoader(
     validation_set, batch_size=batch_size, shuffle=False
 )
 
-training_gen = DatasetGenerator.combine(
-    training_generators, device=device, batch_size=batch_size, batch_count=20
+training_gen = DatasetGenerator(
+    background_images=train_bg,
+    foreground_images=foreground_images,
+    device=device,
+    alpha_factor=alpha_factor,
+    rng=rng,
+    tile_size=tile_size,
+)
+
+batch_count = 20
+
+dynamic_training_gen = DynamicGenerator(
+    training_gen, batch_count=batch_count, batch_size=batch_size
 )
 
 
@@ -119,7 +147,7 @@ def train_one_epoch(epoch_index):
     # Here, we use enumerate(training_loader) instead of
     # iter(training_loader) so that we can track the batch
     # index and do some intra-epoch reporting
-    for i, data in enumerate(training_gen):
+    for i, data in enumerate(dynamic_training_gen):
         # for i, data in enumerate(training_loader):
         # print("data", type(data))
         # Every data instance is an input + label pair
