@@ -7,6 +7,7 @@ from pathlib import Path
 
 import torch
 import torchvision
+
 from dataset_generator import DatasetGenerator
 from drive_loader import load_drive_dataset
 from model import Unet
@@ -30,9 +31,13 @@ validation_set = [(a.image, a.manual1) for a in train + test]
 # tile_size = (400, 400)
 tile_size = (256, 256)
 
+
+training_set = []
+validation_set = []
+
+training_generators = []
+
 if True:
-    training_set = []
-    validation_set = []
     for tileset in ["cave", "barracks"]:
         background_dir = f"../../datasets/background/{tileset}/"
         foreground_dir = f"../../datasets/foreground/{tileset}/"
@@ -40,6 +45,7 @@ if True:
         training_set.extend(
             d.generate(count=100, tile_size=tile_size, seed=34234233, alpha_factor=0.5)
         )
+        training_generators.append(d)
         validation_set.extend(
             d.generate(count=30, tile_size=tile_size, seed=2, alpha_factor=0.5)
         )
@@ -79,6 +85,10 @@ validation_loader = torch.utils.data.DataLoader(
     validation_set, batch_size=batch_size, shuffle=False
 )
 
+training_gen = DatasetGenerator.combine(
+    training_generators, device=device, batch_size=batch_size, batch_count=20
+)
+
 
 # Initializing in a separate cell so we can easily add more epochs to the same run
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -109,9 +119,13 @@ def train_one_epoch(epoch_index):
     # Here, we use enumerate(training_loader) instead of
     # iter(training_loader) so that we can track the batch
     # index and do some intra-epoch reporting
-    for i, data in enumerate(training_loader):
+    for i, data in enumerate(training_gen):
+        # for i, data in enumerate(training_loader):
+        # print("data", type(data))
         # Every data instance is an input + label pair
         inputs, labels = data
+        # print("inputs", type(inputs), inputs.shape)
+        # print("labels", type(labels), labels.shape)
 
         count += 1
 
@@ -174,7 +188,7 @@ for epoch in range(EPOCHS):
 
             # And lets write that to disk shall we.
             batch_size = vinputs.shape[0]
-            if True and (epoch < 10 or epoch % 10 == 0):
+            if True:  # and (epoch < 10 or epoch % 10 == 0):
                 epoch_dir.mkdir(parents=True, exist_ok=True)
                 for frame_i in range(batch_size):
                     real_i = i * batch_size + frame_i

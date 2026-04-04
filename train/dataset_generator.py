@@ -49,18 +49,38 @@ def rng_choice(rng, container):
 
 class DatasetGenerator:
     def __init__(
-        self, background_dir, foreground_dir, limit=float("inf"), device="cpu"
+        self,
+        background_dir=None,
+        foreground_dir=None,
+        limit=float("inf"),
+        device="cpu",
+        batch_size=None,
+        batch_count=None,
     ):
-        self._background_dir = Path(background_dir)
-        self._foreground_dir = Path(foreground_dir)
-        self._background_crop_top_left = (105, 27)
-        self._background_crop_size = (1700, 825)
-
-        self._background_images = []
-        self._foreground_images = []
         self._limit = limit
         self._device = device
-        self.load_images()
+        self._batch_size = batch_size
+        self._batch_count = batch_count
+        self._background_images = []
+        self._foreground_images = []
+        self._background_crop_top_left = (105, 27)
+        self._background_crop_size = (1700, 825)
+        if background_dir and foreground_dir:
+            self.load_images(
+                foreground_dir=Path(foreground_dir), background_dir=Path(background_dir)
+            )
+
+    @staticmethod
+    def combine(
+        generators,
+        **kwargs,
+    ):
+        n = DatasetGenerator(**kwargs)
+        for g in generators:
+            n._background_images.extend([t.to(n._device) for t in g._background_images])
+            n._foreground_images.extend([t.to(n._device) for t in g._foreground_images])
+
+        return n
 
     def load_image(self, d):
         image = Image.open(d)
@@ -85,16 +105,16 @@ class DatasetGenerator:
             image = image[0:3, :, :]
         return image
 
-    def load_images(self):
+    def load_images(self, foreground_dir: Path, background_dir: Path):
         count = 0
-        for f in self._background_dir.rglob("*.png"):
+        for f in background_dir.rglob("*.png"):
             background_image = self.load_background_image(f)
             self._background_images.append(background_image)
             count += 1
             if count > self._limit:
                 break
         count = 0
-        for f in self._foreground_dir.rglob("*.png"):
+        for f in foreground_dir.rglob("*.png"):
             self._foreground_images.append(self.load_image(f))
             count += 1
             if count > self._limit:
@@ -184,6 +204,22 @@ class DatasetGenerator:
         # ]
         return results
 
+    def set_batch_size(self, batch_size):
+        self._batch_size = batch_size
+
+    def set_batch_count(self, batch_count):
+        self._batch_count = batch_count
+
+    def __iter__(self):
+        def gen():
+            for i in range(self._batch_count):
+                g = self.generate(self._batch_size)
+                d = torch.cat([z[0].unsqueeze(0) for z in g], dim=0)
+                m = torch.cat([z[1].unsqueeze(0) for z in g], dim=0)
+                yield (d, m)
+
+        return gen()
+
 
 if __name__ == "__main__":
     background_dir = "../../datasets/background/cave/"
@@ -192,3 +228,15 @@ if __name__ == "__main__":
         background_dir, foreground_dir=foreground_dir, limit=2, device="cuda:0"
     )
     d.debug_dump()
+
+    d.set_batch_size(4)
+
+    # data <class 'list'>
+    # inputs <class 'torch.Tensor'> torch.Size([4, 3, 256, 256])
+    # labels <class 'torch.Tensor'> torch.Size([4, 256, 256])
+    for i, data in enumerate(d):
+        print("data", type(data))
+        # Every data instance is an input + label pair
+        inputs, labels = data
+        print("inputs", type(inputs), inputs.shape)
+        print("labels", type(labels), labels.shape)
