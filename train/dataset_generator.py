@@ -54,6 +54,14 @@ def rng_shuffle(rng, container):
     return [container[i] for i in shuffled_i]
 
 
+def load_image_file(d, device):
+    image = Image.open(d)
+    image = ToTensor()(image)
+    image = image.to(device)
+    # print("load image", type(image))
+    return image
+
+
 class ImageLoader:
     def __init__(
         self,
@@ -87,15 +95,8 @@ class ImageLoader:
         v = ImageLoader(image_dir=image_dir, **kwargs)
         return v
 
-    def load_image_file(self, d):
-        image = Image.open(d)
-        image = ToTensor()(image)
-        image = image.to(self._device)
-        # print("load image", type(image))
-        return image
-
     def load_image(self, d):
-        image = self.load_image_file(d)
+        image = load_image_file(d, device=self._device)
         left, top = (0, 0) if self._crop_top_left is None else self._crop_top_left
         width, height = (
             (image.shape[1] - left, image.shape[2] - top)
