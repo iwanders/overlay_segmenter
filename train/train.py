@@ -161,7 +161,7 @@ def train_one_epoch(epoch_index):
     return epoch_loss / count
 
 
-save_model = False
+save_model = True
 for epoch in range(EPOCHS):
     print("EPOCH {}:".format(epoch_number + 1))
 

@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torchvision
 from PIL import Image
+from torch import Tensor
 from torchvision.io import decode_jpeg, encode_jpeg
 from torchvision.transforms import ToTensor
 
@@ -47,6 +48,78 @@ def rng_choice(rng, container):
     return container[i]
 
 
+class ImageLoader:
+    def __init__(
+        self,
+        image_dir: Path,
+        crop_top_left: None | tuple[int, int] = None,
+        crop_size: None | tuple[int, int] = None,
+        device="cpu",
+        remove_alpha=False,
+    ):
+        self._crop_top_left = crop_top_left
+        print(self._crop_top_left)
+        self._crop_size = crop_size
+        self._images = []
+        self._device = device
+        self._image_dir: Path = image_dir
+        self._remove_alpha = remove_alpha
+        self.load_images()
+
+    @staticmethod
+    def background_loader(image_dir, **kwargs):
+        if "crop_top_left" not in kwargs:
+            kwargs["crop_top_left"] = (105, 27)
+        if "crop_size" not in kwargs:
+            kwargs["crop_size"] = (1700, 825)
+        if "remove_alpha" not in kwargs:
+            kwargs["remove_alpha"] = True
+        v = ImageLoader(image_dir=image_dir, **kwargs)
+        return v
+
+    @staticmethod
+    def foreground_loader(image_dir, **kwargs):
+        v = ImageLoader(image_dir=image_dir, **kwargs)
+        return v
+
+    def load_image_file(self, d):
+        image = Image.open(d)
+        image = ToTensor()(image)
+        image = image.to(self._device)
+        # print("load image", type(image))
+        return image
+
+    def load_image(self, d):
+        image = self.load_image_file(d)
+        left, top = (0, 0) if self._crop_top_left is None else self._crop_top_left
+        width, height = (
+            (image.shape[1] - left, image.shape[2] - top)
+            if self._crop_size is None
+            else self._crop_size
+        )
+        bottom = top + height
+        right = left + width
+        image = image[
+            :,
+            top:bottom,
+            left:right,
+        ]
+        # print("load load_background_image", type(image))
+        # Background images may have an alpha channel, but we don't want that.
+        if self._remove_alpha:
+            if image.shape[0] == 4:
+                image = image[0:3, :, :]
+        return image
+
+    def load_images(self):
+        for f in self._image_dir.rglob("*.png"):
+            background_image = self.load_image(f)
+            self._images.append(background_image)
+
+    def images(self) -> list[Tensor]:
+        return self._images
+
+
 class DatasetGenerator:
     def __init__(
         self,
@@ -63,8 +136,6 @@ class DatasetGenerator:
         self._batch_count = batch_count
         self._background_images = []
         self._foreground_images = []
-        self._background_crop_top_left = (105, 27)
-        self._background_crop_size = (1700, 825)
         if background_dir and foreground_dir:
             self.load_images(
                 foreground_dir=Path(foreground_dir), background_dir=Path(background_dir)
@@ -81,44 +152,6 @@ class DatasetGenerator:
             n._foreground_images.extend([t.to(n._device) for t in g._foreground_images])
 
         return n
-
-    def load_image(self, d):
-        image = Image.open(d)
-        image = ToTensor()(image)
-        image = image.to(self._device)
-        # print("load image", type(image))
-        return image
-
-    def load_background_image(self, d):
-        image = self.load_image(d)
-        left, top = self._background_crop_top_left
-        bottom = top + self._background_crop_size[1]
-        right = left + self._background_crop_size[0]
-        image = image[
-            :,
-            top:bottom,
-            left:right,
-        ]
-        # print("load load_background_image", type(image))
-        # Background images may have an alpha channel, but we don't want that.
-        if image.shape[0] == 4:
-            image = image[0:3, :, :]
-        return image
-
-    def load_images(self, foreground_dir: Path, background_dir: Path):
-        count = 0
-        for f in background_dir.rglob("*.png"):
-            background_image = self.load_background_image(f)
-            self._background_images.append(background_image)
-            count += 1
-            if count > self._limit:
-                break
-        count = 0
-        for f in foreground_dir.rglob("*.png"):
-            self._foreground_images.append(self.load_image(f))
-            count += 1
-            if count > self._limit:
-                break
 
     def debug_dump(self):
         output = Path("/tmp/debug_dump")
@@ -224,6 +257,12 @@ class DatasetGenerator:
 if __name__ == "__main__":
     background_dir = "../../datasets/background/cave/"
     foreground_dir = "../../datasets/foreground/cave/"
+
+    l = ImageLoader.background_loader(Path(background_dir))
+    print(l.images())
+    print(l.images()[0].shape)
+    print(l)
+
     d = DatasetGenerator(
         background_dir, foreground_dir=foreground_dir, limit=2, device="cuda:0"
     )
