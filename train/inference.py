@@ -221,17 +221,24 @@ def run_inference(args):
         image = load_image_file(f, device=best_device)
         if image.shape[0] == 4:
             image = image[0:3, :, :]
-        # masked = tiled_inference(model, image, device=best_device)
 
-        cutter = TileCutter(image.shape[1:], overlap=64)
-        tiles = cutter.split(image)
-        batch_masks = batched_inference(model, tiles)
-        masked = cutter.merge(batch_masks)
+        time_start = time.time()
+        if True:
+            # This one takes 0.003677845001220703 for subsequent calls.
+            masked = tiled_inference(model, image, device=best_device)
+        else:
+            # This one takes 0.57 for subsequent calls O_o
+            cutter = TileCutter(image.shape[1:], overlap=16)
+            tiles = cutter.split(image)
+            batch_masks = batched_inference(model, tiles)
+            masked = cutter.merge(batch_masks)
+
+        time_end = time.time()
 
         name_prefix = Path(f).stem
         batch_path = out_dir / f"{name_prefix}_batch.png"
-        cutter.debug_dump_batch(tiles, batch_path)
-        print(f"Done {name_prefix} in {time.time() - s} seconds")
+        # cutter.debug_dump_batch(tiles, batch_path)
+        print(f"Done {name_prefix} in {time_end - time_start} seconds")
         write_network_output(masked, directory=out_dir, name_prefix=name_prefix)
 
 
