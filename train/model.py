@@ -19,6 +19,7 @@ import torch.nn as nn
 class Unet(nn.Module):
     def __init__(self, channels_in=3, channels_out=2):
         super().__init__()
+        self._channels_out = channels_out
 
         def conv_block(in_channels, out_channels):
             return nn.Sequential(
@@ -77,6 +78,9 @@ class Unet(nn.Module):
             kernel_size=1,  # , padding=1
             # Probably don't want that padding, since it makes the output image a different size than the input image.
         )
+
+    def channels_out(self):
+        return self._channels_out
 
     def forward(self, x):
         # First encoder
