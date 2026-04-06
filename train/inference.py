@@ -7,6 +7,7 @@ from itertools import batched
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 import torchvision
 from torch import Tensor
 
@@ -43,7 +44,7 @@ class TileCutter:
         self._actual_size = self._tile_size - 2 * self._overlap
 
     # Input is [C, H, W], output is [B, C, tile_size,tile_size]
-    def split(self, input_tensor: Tensor) -> Tensor:
+    def split_manual(self, input_tensor: Tensor) -> Tensor:
         pad_value = self._tile_size
         p = torchvision.transforms.Pad(pad_value, fill=0, padding_mode="reflect")
 
@@ -76,7 +77,7 @@ class TileCutter:
         return tiles
 
     # Input is  [B, C, tile_size,tile_size], output is [C, H, W]
-    def merge(self, tiles: Tensor) -> Tensor:
+    def merge_manual(self, tiles: Tensor) -> Tensor:
         height, width = self._input_shape
         x_max = math.ceil(width / self._actual_size)
         y_max = math.ceil(height / self._actual_size)
@@ -101,10 +102,107 @@ class TileCutter:
         merged = merged[:, 0:height, 0:width].detach().clone()
         return merged
 
+    def split(self, input_tensor: Tensor) -> Tensor:
+        pad_value = self._tile_size
+        p = torchvision.transforms.Pad(pad_value, fill=0, padding_mode="reflect")
+
+        padded = p(input_tensor)
+
+        height = input_tensor.shape[1]
+        width = input_tensor.shape[2]
+        channels = input_tensor.shape[0]
+        assert (height, width) == self._input_shape
+
+        # https://stackoverflow.com/a/78022020
+        step = self._tile_size - self._overlap
+        padding_width = (step - (width - self._overlap) % step) % step
+        padding_height = (step - (height - self._overlap) % step) % step
+
+        print("Input image shape: ", input_tensor.shape)
+        image = F.pad(
+            input_tensor,
+            (
+                0,
+                padding_width,
+                0,
+                padding_height,
+                0,
+                0,
+            ),
+        )
+        print("padded image shape: ", image.shape)
+        tiled = image.unfold(1, self._tile_size, step).unfold(2, self._tile_size, step)
+        print("unfold image shape: ", tiled.shape)
+        tiled = tiled.moveaxis(0, 2)
+        print("moveaxis image shape: ", tiled.shape)
+        tiled = tiled.reshape(
+            [
+                tiled.shape[0] * tiled.shape[1],
+                tiled.shape[2],
+                tiled.shape[3],
+                tiled.shape[4],
+            ]
+        )
+        print("reshape image shape: ", tiled.shape)
+        print("tiled moved", tiled.shape)
+
+        return tiled
+
+    def merge(self, tiles: Tensor) -> Tensor:
+        height, width = self._input_shape
+        step = self._tile_size - self._overlap
+        padding_width = (step - (width - self._overlap) % step) % step
+        padding_height = (step - (height - self._overlap) % step) % step
+
+        padded_height = height + padding_height
+        padded_width = width + padding_width
+
+        x_count = int(padded_width / step)
+        y_count = int(padded_height / step)
+        print("merge in: ", tiles.shape)
+        channels = tiles.shape[1]
+
+        # now, inverse the steps.
+        tiles = tiles.reshape(
+            [
+                y_count,
+                x_count,
+                tiles.shape[1],
+                tiles.shape[2],
+                tiles.shape[3],
+            ]
+        )
+        print(tiles.shape)
+
+        # tiles = tiles.moveaxis(2, 0)
+        print(tiles.shape)
+        # This is a bit cllunky...
+        merged = torch.zeros(
+            (channels, padded_height, padded_width),
+            dtype=torch.float,
+            device=tiles[0].device,
+        )
+        for y in range(y_count):
+            for x in range(x_count):
+                tile_x = step * x
+                tile_y = step * y
+                tile_x_end = step * (x + 1)
+                tile_y_end = step * (y + 1)
+                merged[:, tile_y:tile_y_end, tile_x:tile_x_end] = tiles[
+                    y,
+                    x,
+                    :,
+                    int(self._overlap / 2) : -int(self._overlap / 2),
+                    int(self._overlap / 2) : -int(self._overlap / 2),
+                ]
+
+        return merged[:, 0:height, 0:width].clone()
+
     def debug_dump_batch(self, tiles: Tensor, output="/tmp/my_batch.png"):
         height, width = self._input_shape
         x_max = math.ceil(width / self._actual_size)
         # y_max = math.ceil(height / self._actual_size)
+        print("saved to ", output)
         torchvision.utils.save_image(tiles, output, nrow=x_max, normalize=True)
 
 
@@ -119,8 +217,9 @@ def run_test(args):
     cutter = TileCutter(input_shape=dummy.shape[1:])
     tiles = cutter.split(dummy)
     print(tiles.shape)
+    print("saving")
     torchvision.utils.save_image(tiles, "/tmp/my_batch.png", nrow=10, normalize=True)
-
+    print("merging")
     merged = cutter.merge(tiles)
     torchvision.utils.save_image(merged, "/tmp/merged.png", normalize=True)
 
@@ -223,7 +322,7 @@ def run_inference(args):
             image = image[0:3, :, :]
 
         time_start = time.time()
-        if True:
+        if False:
             # This one takes 0.003677845001220703 for subsequent calls.
             masked = tiled_inference(model, image, device=best_device)
         else:

@@ -138,10 +138,14 @@ if __name__ == "__main__":
     input_channels = 3
     output_channels = 2
     model = Unet(channels_in=input_channels, channels_out=output_channels)
-    image_width = 512
-    image_height = 512 * 2
-    im = torch.randn(batch_size, input_channels, image_width, image_height)
-    x = model(im)
+    model.to("cuda")
+    image_width = 256
+    image_height = 256
+    im = torch.randn(
+        batch_size, input_channels, image_width, image_height, device="cuda"
+    )
+    with torch.no_grad():
+        x = model(im)
     print(f"Input shape: {im.shape}", im[:, 0:3, 0:3])
     print(f"Output shape: {x.shape}", x[:, 0:3, 0:3])
 
@@ -149,6 +153,7 @@ if __name__ == "__main__":
     model = Unet(channels_in=3, channels_out=1)
     # im = torch.randn(4, 3, 584, 565)
     im = torch.randn(4, 3, 512, 512)
-    x = model(im)
+    with torch.no_grad():
+        x = model(im)
     print(f"Input shape: {im.shape}", im[:, 0:3, 0:3])
     print(f"Output shape: {x.shape}", x[:, 0:3, 0:3])
