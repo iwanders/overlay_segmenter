@@ -192,6 +192,8 @@ class DatasetGenerator:
                 padding_mode="edge",
             )
             img = padder(img)
+            width = img.shape[1]
+            height = img.shape[2]
         # Sample mostly from the center, but corners are possible.
         x = rng.normal(loc=(width / 2.0) - (tile_size[0] / 2), scale=width / 4.0)
         y = rng.normal(loc=(height / 2.0) - (tile_size[1] / 2), scale=height / 4.0)
