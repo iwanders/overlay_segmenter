@@ -2,12 +2,15 @@
 #
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
 import torch
 import torchvision
+import yaml
 from PIL import Image
+from pydantic import BaseModel, ConfigDict
 from torch import Tensor
 from torchvision.io import decode_jpeg, encode_jpeg
 from torchvision.transforms import ToTensor
@@ -16,6 +19,49 @@ from torchvision.transforms import ToTensor
 def load_paths(path_file):
     with open(path_file) as f:
         return [a.strip() for a in f.readlines()]
+
+
+class DataPair(BaseModel):
+    foreground_subdir: list[str]
+    background_subdir: list[str]
+
+
+class DataGenerationSpec(BaseModel):
+    background_dir: str
+    foreground_dir: str
+    data_pair: list[DataPair]
+
+
+class DataLoader:
+    def __init__(self, config_file):
+        with open(config_file) as f:
+            d = yaml.safe_load(f)
+        self._spec = DataGenerationSpec.model_validate(d)
+        self._bg_images: dict[str, list[Tensor]] = {}
+        self._fg_images: dict[str, list[Tensor]] = {}
+        self.load_images()
+
+    def load_images(self):
+        bg_dir = Path(self._spec.background_dir)
+        fg_dir = Path(self._spec.foreground_dir)
+
+        def load_datapair(data_pairs):
+            for fg_subdir in data_pairs.foreground_subdir:
+                if fg_subdir not in self._fg_images:
+                    self._fg_images[fg_subdir] = ImageLoader.foreground_loader(
+                        fg_dir / fg_subdir
+                    ).images()
+
+            for bg_subdir in data_pairs.background_subdir:
+                if bg_subdir not in self._bg_images:
+                    self._fg_images[bg_subdir] = ImageLoader.background_loader(
+                        bg_dir / bg_subdir
+                    ).images()
+
+        for data_pair in self._spec.data_pair:
+            load_datapair(data_pair)
+
+        print(self._fg_images)
 
 
 def clamp(value, min_val, max_val):
@@ -122,15 +168,33 @@ class ImageLoader:
         return image
 
     def load_images(self):
-        for f in self._image_dir.rglob("*.png"):
-            background_image = self.load_image(f)
-            self._images.append(background_image)
+        to_load = list(self._image_dir.rglob("*.png"))
+
+        def load_img(f):
+            return self.load_image(f)
+
+        with ThreadPoolExecutor() as executor:
+            res = list(executor.map(load_img, to_load))
+            self._images.extend(res)
 
     def images(self) -> list[Tensor]:
         return self._images
 
 
+class CollectionPair(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    foreground: list[Tensor]
+    background: list[Tensor]
+
+
 class DatasetGenerator:
+    """
+    Main data set generator.
+
+    Instead of background and foreground images and allowing freely mixing each, it now takes:
+        data: list[CollectionPair]
+    """
+
     def __init__(
         self,
         background_images: list[Tensor],
@@ -267,28 +331,32 @@ class DynamicGenerator:
 
 
 if __name__ == "__main__":
-    background_dir = "../../datasets/background/cave/"
-    foreground_dir = "../../datasets/foreground/cave/"
 
-    background_images = ImageLoader.background_loader(Path(background_dir))
-    foreground_images = ImageLoader.foreground_loader(Path(foreground_dir))
+    def test_generation():
+        background_dir = "../../datasets/background/cave/"
+        foreground_dir = "../../datasets/foreground/cave/"
 
-    d = DatasetGenerator(
-        background_images=background_images.images(),
-        foreground_images=foreground_images.images(),
-        device="cuda:0",
-    )
-    d.debug_dump()
+        background_images = ImageLoader.background_loader(Path(background_dir))
+        foreground_images = ImageLoader.foreground_loader(Path(foreground_dir))
 
-    d.set_batch_size(4)
-    d.set_batch_count(4)
+        d = DatasetGenerator(
+            background_images=background_images.images(),
+            foreground_images=foreground_images.images(),
+            device="cuda:0",
+        )
+        d.debug_dump()
 
-    # data <class 'list'>
-    # inputs <class 'torch.Tensor'> torch.Size([4, 3, 256, 256])
-    # labels <class 'torch.Tensor'> torch.Size([4, 256, 256])
-    for i, data in enumerate(d):
-        print("data", type(data))
-        # Every data instance is an input + label pair
-        inputs, labels = data
-        print("inputs", type(inputs), inputs.shape)
-        print("labels", type(labels), labels.shape)
+        d.set_batch_size(4)
+        d.set_batch_count(4)
+
+        # data <class 'list'>
+        # inputs <class 'torch.Tensor'> torch.Size([4, 3, 256, 256])
+        # labels <class 'torch.Tensor'> torch.Size([4, 256, 256])
+        for i, data in enumerate(d):
+            print("data", type(data))
+            # Every data instance is an input + label pair
+            inputs, labels = data
+            print("inputs", type(inputs), inputs.shape)
+            print("labels", type(labels), labels.shape)
+
+    l = DataLoader("dataset.priv.yaml")
