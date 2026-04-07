@@ -32,6 +32,12 @@ class DataGenerationSpec(BaseModel):
     data_pair: list[DataPair]
 
 
+class CollectionPair(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    foreground: list[Tensor]
+    background: list[Tensor]
+
+
 class DataLoader:
     def __init__(self, config_file):
         with open(config_file) as f:
@@ -54,14 +60,27 @@ class DataLoader:
 
             for bg_subdir in data_pairs.background_subdir:
                 if bg_subdir not in self._bg_images:
-                    self._fg_images[bg_subdir] = ImageLoader.background_loader(
+                    self._bg_images[bg_subdir] = ImageLoader.background_loader(
                         bg_dir / bg_subdir
                     ).images()
 
         for data_pair in self._spec.data_pair:
             load_datapair(data_pair)
 
-        print(self._fg_images)
+    def generate_data_pairs(self) -> list[CollectionPair]:
+        # This is where we actually make the collection that can be trained on.
+        r = []
+        for data_pairs in self._spec.data_pair:
+            foreground = []
+            background = []
+            for fg_subdir in data_pairs.foreground_subdir:
+                foreground.extend(self._fg_images[fg_subdir])
+            for bg_subdir in data_pairs.background_subdir:
+                background.extend(self._bg_images[bg_subdir])
+            p = CollectionPair(foreground=foreground, background=background)
+            r.append(p)
+
+        return r
 
 
 def clamp(value, min_val, max_val):
@@ -179,12 +198,6 @@ class ImageLoader:
 
     def images(self) -> list[Tensor]:
         return self._images
-
-
-class CollectionPair(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    foreground: list[Tensor]
-    background: list[Tensor]
 
 
 class DatasetGenerator:
@@ -360,3 +373,4 @@ if __name__ == "__main__":
             print("labels", type(labels), labels.shape)
 
     l = DataLoader("dataset.priv.yaml")
+    print(l.generate_data_pairs())
