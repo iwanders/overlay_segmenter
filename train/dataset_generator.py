@@ -247,10 +247,11 @@ class DatasetGenerator:
 
 
 class DynamicGenerator:
-    def __init__(self, generator, batch_count=20, batch_size=4):
+    def __init__(self, generator, batch_count=20, batch_size=4, device="cpu"):
         self._generator = generator
         self._batch_count = batch_count
         self._batch_size = batch_size
+        self._device = device
 
     def __iter__(self):
         def gen():
@@ -258,6 +259,8 @@ class DynamicGenerator:
                 g = self._generator.generate(self._batch_size)
                 d = torch.cat([z[0].unsqueeze(0) for z in g], dim=0)
                 m = torch.cat([z[1].unsqueeze(0) for z in g], dim=0)
+                d = d.to(self._device)
+                m = m.to(self._device)
                 yield (d, m)
 
         return gen()

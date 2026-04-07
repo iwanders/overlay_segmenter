@@ -107,7 +107,7 @@ validation_loader = torch.utils.data.DataLoader(
 training_gen = DatasetGenerator(
     background_images=train_bg,
     foreground_images=foreground_images,
-    device=device,
+    device="cpu",
     alpha_factor=alpha_factor,
     rng=rng,
     tile_size=tile_size,
@@ -116,7 +116,7 @@ training_gen = DatasetGenerator(
 batch_count = 20
 
 dynamic_training_gen = DynamicGenerator(
-    training_gen, batch_count=batch_count, batch_size=batch_size
+    training_gen, batch_count=batch_count, batch_size=batch_size, device=device
 )
 
 
