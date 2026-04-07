@@ -13,6 +13,7 @@ from dataset_generator import (
     DatasetGenerator,
     DynamicGenerator,
     ImageLoader,
+    load_paths,
     rng_shuffle,
 )
 from model import Unet
@@ -44,10 +45,11 @@ foreground_dir = Path("../../datasets/foreground/")
 background_images = []
 foreground_images = []
 
-for tileset in ["cave", "barracks"]:
+for tileset in load_paths("background.priv.txt"):
     background_images.extend(
         ImageLoader.background_loader(background_dir / tileset).images()
     )
+for tileset in load_paths("foreground.priv.txt"):
     foreground_images.extend(
         ImageLoader.foreground_loader(foreground_dir / tileset).images()
     )

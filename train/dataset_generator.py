@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 #
 
-import concurrent.futures
 import time
 from pathlib import Path
 
@@ -12,6 +11,11 @@ from PIL import Image
 from torch import Tensor
 from torchvision.io import decode_jpeg, encode_jpeg
 from torchvision.transforms import ToTensor
+
+
+def load_paths(path_file):
+    with open(path_file) as f:
+        return [a.strip() for a in f.readlines()]
 
 
 def clamp(value, min_val, max_val):
@@ -181,6 +185,13 @@ class DatasetGenerator:
         # channels, width, height
         width = img.shape[1]
         height = img.shape[2]
+
+        if width < tile_size[1] or height < tile_size[0]:
+            padder = torchvision.transforms.Pad(
+                (max((tile_size[1] - width), 0), max((tile_size[0] - height), 0)),
+                padding_mode="edge",
+            )
+            img = padder(img)
         # Sample mostly from the center, but corners are possible.
         x = rng.normal(loc=(width / 2.0) - (tile_size[0] / 2), scale=width / 4.0)
         y = rng.normal(loc=(height / 2.0) - (tile_size[1] / 2), scale=height / 4.0)

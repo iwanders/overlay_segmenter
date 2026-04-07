@@ -322,7 +322,7 @@ def run_inference(args):
             image = image[0:3, :, :]
 
         time_start = time.time()
-        if False:
+        if True:
             # This one takes 0.003677845001220703 for subsequent calls.
             masked = tiled_inference(model, image, device=best_device)
         else:
