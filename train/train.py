@@ -10,6 +10,7 @@ import torch
 import torchvision
 
 from dataset_generator import (
+    DataLoader,
     DatasetGenerator,
     DynamicGenerator,
     ImageLoader,
@@ -38,49 +39,23 @@ validation_set = []
 
 training_generators = []
 
+train_rng = np.random.default_rng(41)
+loader = DataLoader("dataset.priv.yaml")
+print()
+train_generator = DatasetGenerator(
+    data_pairs=loader.generate_data_pairs(), rng=train_rng
+)
 
-background_dir = Path("../../datasets/background/")
-foreground_dir = Path("../../datasets/foreground/")
-
-background_images = []
-foreground_images = []
-
-for tileset in load_paths("background.priv.txt"):
-    background_images.extend(
-        ImageLoader.background_loader(background_dir / tileset).images()
-    )
-for tileset in load_paths("foreground.priv.txt"):
-    foreground_images.extend(
-        ImageLoader.foreground_loader(foreground_dir / tileset).images()
-    )
-
-
-rng = np.random.default_rng(seed=3)
-background_images = rng_shuffle(rng, background_images)
-foreground_images = rng_shuffle(rng, foreground_images)
-
-
-total_bg = len(background_images)
-validation_bg_split = int(total_bg * 0.1)
-validation_bg = background_images[0:validation_bg_split]
-train_bg = background_images[validation_bg_split + 1 :]
-print(f"Validation bgs: {len(validation_bg)}")
-print(f"Train bgs: {len(train_bg)}")
+validation_rng = np.random.default_rng(43)
+validation_generator = train_generator.split_out_validation(0.1, rng=validation_rng)
 
 validation_set = []
-validation_generator = DatasetGenerator(
-    background_images=validation_bg,
-    foreground_images=foreground_images,
-    device=device,
-    rng=rng,
-    tile_size=tile_size,
-    alpha_factor=alpha_factor,
-)
 validation_set.extend(
     validation_generator.generate(
         count=30,
     )
 )
+validation_set = [(a.to(device), b.to(device)) for a, b in validation_set]
 
 
 if True:
@@ -104,14 +79,7 @@ validation_loader = torch.utils.data.DataLoader(
     validation_set, batch_size=batch_size, shuffle=False
 )
 
-training_gen = DatasetGenerator(
-    background_images=train_bg,
-    foreground_images=foreground_images,
-    device="cpu",
-    alpha_factor=alpha_factor,
-    rng=rng,
-    tile_size=tile_size,
-)
+training_gen = train_generator
 
 batch_count = 20
 

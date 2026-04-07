@@ -16,6 +16,20 @@ from torchvision.io import decode_jpeg, encode_jpeg
 from torchvision.transforms import ToTensor
 
 
+class TensorNameTracker:
+    def __init__(self):
+        self._names = {}
+
+    def set_name(self, t: Tensor, name: str):
+        self._names[id(t)] = name
+
+    def get_name(self, t: Tensor):
+        return self._names.get(id(t))
+
+
+tensor_tracker = TensorNameTracker()
+
+
 def load_paths(path_file):
     with open(path_file) as f:
         return [a.strip() for a in f.readlines()]
@@ -190,7 +204,10 @@ class ImageLoader:
         to_load = list(self._image_dir.rglob("*.png"))
 
         def load_img(f):
-            return self.load_image(f)
+            img = self.load_image(f)
+            filename = f.stem
+            tensor_tracker.set_name(img, filename)
+            return img
 
         with ThreadPoolExecutor() as executor:
             res = list(executor.map(load_img, to_load))
@@ -202,16 +219,21 @@ class ImageLoader:
 
 class DatasetGenerator:
     """
-    Main data set generator.
+        Main data set generator.
 
-    Instead of background and foreground images and allowing freely mixing each, it now takes:
-        data: list[CollectionPair]
+        Instead of background and foreground images and allowing freely mixing each, it now takes:
+            data: list[CollectionPair]
+
+
+    class CollectionPair(BaseModel):
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+        foreground: list[Tensor]
+        background: list[Tensor]
     """
 
     def __init__(
         self,
-        background_images: list[Tensor],
-        foreground_images: list[Tensor],
+        data_pairs: list[CollectionPair],
         device="cpu",
         batch_size: int | None = None,
         batch_count: int | None = None,
@@ -222,13 +244,47 @@ class DatasetGenerator:
         self._device = device
         self._batch_size: int | None = batch_size
         self._batch_count: int | None = batch_count
-        self._background_images = [a.to(device) for a in background_images]
-        self._foreground_images = [a.to(device) for a in foreground_images]
+
+        # prepare data pairs for sampling with background first, second pair mapping to the foreground options.
+        self._sample_entries: list[tuple[Tensor, list[Tensor]]] = []
+        for data_pair in data_pairs:
+            for bg in data_pair.background:
+                if len(data_pair.foreground) == 0:
+                    raise ValueError(
+                        "Foreground count is zero for bg: ",
+                        tensor_tracker.get_name(bg),
+                    )
+                self._sample_entries.append((bg, data_pair.foreground))
         self._rng = rng
         self._tile_size = tile_size
         self._alpha_factor = alpha_factor
         if self._rng is None:
             self._rng = np.random.default_rng()
+
+        self._sample_entries = rng_shuffle(self._rng, self._sample_entries)
+
+    def split_out_validation(
+        self,
+        ratio: float = 0.1,
+        rng: np.random.Generator | None = None,
+    ) -> "DatasetGenerator":
+        validation = DatasetGenerator([])
+        validation._device = self._device
+        validation._batch_size = self._batch_size
+        validation._batch_count = self._batch_count
+        validation._tile_size = self._tile_size
+        validation._alpha_factor = self._alpha_factor
+        if rng is None:
+            rng = np.random.default_rng()
+
+        validation._rng = rng
+        total_bg = len(self._sample_entries)
+        validation_bg_split = int(total_bg * ratio)
+        validation_entries = self._sample_entries[0:validation_bg_split]
+        train_entries = self._sample_entries[validation_bg_split + 1 :]
+        validation._sample_entries = validation_entries
+        self._sample_entries = train_entries
+        return validation
 
     def debug_dump(self):
         output = Path("/tmp/debug_dump")
@@ -246,10 +302,10 @@ class DatasetGenerator:
         print("done generating")
         print(f"took {time.time() - start} s")
 
-        for i, img in enumerate(self._background_images):
-            torchvision.utils.save_image(img, output / f"background_{i}.png")
-        for i, img in enumerate(self._foreground_images):
-            torchvision.utils.save_image(img, output / f"foreground_{i}.png")
+        # for i, img in enumerate(self._background_images):
+        #    torchvision.utils.save_image(img, output / f"background_{i}.png")
+        # for i, img in enumerate(self._foreground_images):
+        #    torchvision.utils.save_image(img, output / f"foreground_{i}.png")
 
         for i, (sample_img, sample_mask) in enumerate(generated):
             torchvision.utils.save_image(sample_img, output / f"sample_{i}_img.png")
@@ -288,8 +344,8 @@ class DatasetGenerator:
         results = []
 
         def create_tile(rng):
-            bg = rng_choice(rng, self._background_images)
-            fg = rng_choice(rng, self._foreground_images)
+            (bg, fg_options) = rng_choice(rng, self._sample_entries)
+            fg = rng_choice(rng, fg_options)
             # Next, sample a tile from this.
             bg_tile = DatasetGenerator.sample_tile(
                 bg, tile_size=self._tile_size, rng=rng
@@ -373,4 +429,8 @@ if __name__ == "__main__":
             print("labels", type(labels), labels.shape)
 
     l = DataLoader("dataset.priv.yaml")
-    print(l.generate_data_pairs())
+    print()
+    d = DatasetGenerator(
+        data_pairs=l.generate_data_pairs(),
+    )
+    d.debug_dump()
