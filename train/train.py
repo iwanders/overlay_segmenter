@@ -232,5 +232,6 @@ for epoch in range(EPOCHS):
         # model_path = "/tmp/model_{}_{}".format(timestamp, epoch_number)
         model_path = epoch_dir / "model.pth"
         torch.save(model.state_dict(), model_path)
+        print(f"saved model to {model_path}")
 
     epoch_number += 1
