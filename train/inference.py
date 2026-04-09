@@ -324,7 +324,7 @@ def run_inference(args):
         time_start = time.time()
         if True:
             # This one takes 0.003677845001220703 for subsequent calls.
-            masked = tiled_inference(model, image, device=best_device)
+            masked = tiled_inference(model, image, device=best_device, tile_size=960)
         else:
             # This one takes 0.57 for subsequent calls O_o
             cutter = TileCutter(image.shape[1:], overlap=16)
