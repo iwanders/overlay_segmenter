@@ -16,6 +16,11 @@ import torch.nn as nn
                      """
 
 
+# Todo;
+# - Flag to change Upsample into ConvTranspose2D (upconv)
+# - Probably don't need as thick of a bottleneck at the bottom.
+
+
 class Unet(nn.Module):
     def __init__(self, channels_in=3, channels_out=2):
         super().__init__()

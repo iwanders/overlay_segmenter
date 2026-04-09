@@ -315,7 +315,7 @@ class DatasetGenerator:
 
     @staticmethod
     def sample_tile(img, tile_size, rng):
-        # channels, height, width, 
+        # channels, height, width,
         height = img.shape[1]
         width = img.shape[2]
 
@@ -340,37 +340,86 @@ class DatasetGenerator:
         # print(x, y, width, height)
 
         return img[:, y : y + tile_size[1], x : x + tile_size[0]]
+
     @staticmethod
-    def stamp_tile(rng, canvas, overlay):
-        # channels, height, width, 
-        # Sample mostly from the center, but corners are possible.
-        o_height, o_width = overlay.shape[1:]
-        c_height, c_width = canvas.shape[1:]
-        o_x = int(rng.normal(loc=o_width / 2, scale=o_width / 4.0))
-        o_y = int(rng.normal(loc=o_height / 2, scale=o_height / 4.0))
-        c_x = int(rng.normal(loc=c_width / 2, scale=c_width / 4.0))
-        c_y = int(rng.normal(loc=c_height / 2, scale=c_height / 4.0))
-        
+    def image_overlay(background, foreground, b_x, b_y, f_x, f_y) -> Tensor:
         # We've selected the position in the canvas, and the position in the overlay.
         # next, we have to determine the rectangle in which the bounds overlap.
         # We will place the overlay coordinate onto the canvas coordinate.
-        #canvas_left = c_x - (o_x - o_width / 2)
-        raise NotImplemented("todo, when I'm sharp")
-        
- 
+
+        # Calculate the overlapping region
+        bg_h, bg_w = background.shape[1], background.shape[2]
+        fg_h, fg_w = foreground.shape[1], foreground.shape[2]
+
+        b_x = int(b_x - bg_w / 2)
+        b_y = int(b_y - bg_h / 2)
+        f_x = int(f_x - bg_w / 2)
+        f_y = int(f_y - bg_h / 2)
+
+        # x_offset and y_offset is the top left corner of the overlay in bg coordinates.
+        x_offset = int(b_x - f_x)
+        y_offset = int(b_y - f_y)
+
+        # x_offset = 5
+        # # y_offset = 15
+        # print("x_offset: ", x_offset)
+        # print("y_offset: ", y_offset)
+
+        # Determine intersection coordinates (handles boundary crossing)
+        y1 = max(0, y_offset)
+        y2 = min(bg_h, y_offset + fg_h)
+        x1 = max(0, x_offset)
+        x2 = min(bg_w, x_offset + fg_w)
+
+        # Corresponding coordinates in the foreground image
+        fg_y1 = max(0, -y_offset)
+        fg_y2 = fg_y1 + (y2 - y1)
+        fg_x1 = max(0, -x_offset)
+        fg_x2 = fg_x1 + (x2 - x1)
+
+        # Handle two situations where the intersection is disjoint; ie; the overlay is outside of the bg.
+        if y2 < y1 or x2 < x1:
+            return background
+
+        if fg_y2 < fg_y1 or fg_x2 < fg_x1:
+            return background
+
+        # Apply the overlay
+        background[:, y1:y2, x1:x2] = foreground[:, fg_y1:fg_y2, fg_x1:fg_x2]
+        return background
+        pass
+
     @staticmethod
-    def create_tile(rng, bg: Tensor, fg: Tensor, alpha_factor: float=1.0, tile_size=256)
+    def stamp_tile(
+        rng,
+        tile_size,
+        overlay,
+    ):
+        # channels, height, width,
+        # Sample mostly from the center, but corners are possible.
+        o_height, o_width = overlay.shape[1:]
+        c_height, c_width = tile_size
+        scale_divisor = 6.0
+        o_x = int(rng.normal(loc=o_width / 2, scale=o_width / scale_divisor))
+        o_y = int(rng.normal(loc=o_height / 2, scale=o_height / scale_divisor))
+        c_x = int(rng.normal(loc=c_width / 2, scale=c_width / scale_divisor))
+        c_y = int(rng.normal(loc=c_height / 2, scale=c_height / scale_divisor))
+        canvas = torch.zeros((4, tile_size[0], tile_size[1]), dtype=torch.float)
+
+        return DatasetGenerator.image_overlay(canvas, overlay, c_x, c_y, o_x, o_y)
+
+    @staticmethod
+    def create_tile(
+        rng, bg: Tensor, fg: Tensor, alpha_factor: float = 1.0, tile_size=256
+    ):
         # Next, sample a tile from this.
-        bg_tile = DatasetGenerator.sample_tile(
-            bg, tile_size=tile_size, rng=rng
-        ).clone()
-        fg_tile = DatasetGenerator.sample_tile(
-            fg, tile_size=tile_size, rng=rng
-        )
-    
+        bg_tile = DatasetGenerator.sample_tile(bg, tile_size=tile_size, rng=rng).clone()
+        # fg_tile = DatasetGenerator.sample_tile(fg, tile_size=tile_size, rng=rng)
+        fg_tile = DatasetGenerator.stamp_tile(rng=rng, tile_size=tile_size, overlay=fg)
+
         fg_rgb = fg_tile[:3]
         fg_alpha = fg_tile[3:]  # (1, H, W)
-    
+
         # Now, we perform the blit to create the combined texture....
         combined = alpha_blend(fg_rgb, bg_tile, alpha=fg_alpha * alpha_factor)
         mask = fg_alpha >= 0.5
@@ -385,7 +434,13 @@ class DatasetGenerator:
         def create_tile(rng):
             (bg, fg_options) = rng_choice(rng, self._sample_entries)
             fg = rng_choice(rng, fg_options)
-            return DatasetGenerator.create_tile(rng=self._rng, bg=bg, fg=fg, alpha_factor=self._alpha_factor, tile_size=self._tile_size)
+            return DatasetGenerator.create_tile(
+                rng=self._rng,
+                bg=bg,
+                fg=fg,
+                alpha_factor=self._alpha_factor,
+                tile_size=self._tile_size,
+            )
 
         # with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         #     rngs = [np.random.default_rng(seed=seed + t) for t in range(count)]
@@ -421,8 +476,34 @@ class DynamicGenerator:
         return gen()
 
 
+def test_image_overlay():
+    import sys
+
+    def d(b_x, b_y, f_x, f_y):
+        background = torch.ones((3, 128 * 1, 128 * 1), dtype=torch.float) * 0.2
+        foreground = torch.ones((3, 32, 32), dtype=torch.float)
+
+        r = DatasetGenerator.image_overlay(
+            background, foreground, b_x=b_x, b_y=b_y, f_x=f_x, f_y=f_y
+        )
+        torchvision.utils.save_image(
+            r, f"/tmp/canvas_overlay_{b_x}_{b_y}__{f_x}_{f_y}.png"
+        )
+
+    d(b_x=64, b_y=64, f_x=32, f_y=32)
+    d(b_x=64, b_y=64, f_x=16, f_y=32)
+    d(b_x=64, b_y=64, f_x=32, f_y=16)
+    d(b_x=90, b_y=64, f_x=32, f_y=32)
+    # d(b_x=0, b_y=0, f_x=32, f_y=64)
+    # d(b_x=64, b_y=64, f_x=96, f_y=96)
+    # d(b_x=0, b_y=0, f_x=0, f_y=0)
+
+    sys.exit(1)
+
+
 if __name__ == "__main__":
- 
+    # test_image_overlay()
+
     l = DataLoader("dataset.priv.yaml")
     print()
     d = DatasetGenerator(

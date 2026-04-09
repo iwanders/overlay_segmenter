@@ -43,7 +43,7 @@ train_rng = np.random.default_rng(41)
 loader = DataLoader("dataset.priv.yaml")
 print()
 train_generator = DatasetGenerator(
-    data_pairs=loader.generate_data_pairs(), rng=train_rng
+    data_pairs=loader.generate_data_pairs(), rng=train_rng, alpha_factor=alpha_factor
 )
 
 validation_rng = np.random.default_rng(43)
