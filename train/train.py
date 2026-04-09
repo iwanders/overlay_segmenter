@@ -2,6 +2,7 @@
 #
 #
 # https://docs.pytorch.org/tutorials/beginner/introyt/trainingyt.html#the-training-loop
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -117,7 +118,10 @@ def train_one_epoch(epoch_index):
     # Here, we use enumerate(training_loader) instead of
     # iter(training_loader) so that we can track the batch
     # index and do some intra-epoch reporting
-    for i, data in enumerate(dynamic_training_gen):
+
+    with torch.no_grad():
+        train_data = iter(dynamic_training_gen)
+    for i, data in enumerate(train_data):
         # for i, data in enumerate(training_loader):
         # print("data", type(data))
         # Every data instance is an input + label pair
@@ -163,11 +167,13 @@ save_model = True
 for epoch in range(EPOCHS):
     print("EPOCH {}:".format(epoch_number + 1))
 
+    start_train = time.time()
     # Make sure gradient tracking is on, and do a pass over the data
     model.train(True)
     avg_loss = train_one_epoch(
         epoch_number,
     )
+    end_train = time.time()
 
     running_vloss = 0.0
     # Set the model to evaluation mode, disabling dropout and using population
@@ -175,7 +181,8 @@ for epoch in range(EPOCHS):
     model.eval()
 
     epoch_dir = Path(f"/tmp/train/{epoch:0>3}/")
-    epoch_dir = Path(f"/tmp/train/{epoch:0>3}/")
+
+    start_validation = time.time()
     # Disable gradient computation and reduce memory consumption.
     with torch.no_grad():
         for i, vdata in enumerate(validation_loader):
@@ -222,8 +229,16 @@ for epoch in range(EPOCHS):
                         image_img = epoch_dir / f"eval_{real_i:0>5}_image.png"
                         torchvision.utils.save_image(vinputs[frame_i, :, :], image_img)
 
+    end_validation = time.time()
     avg_vloss = running_vloss / (i + 1)
     print("LOSS train {} valid {}".format(avg_loss, avg_vloss))
+    print(
+        "Train: {:.3} s validation: {:.3} s total: {:.3} s".format(
+            end_train - start_train,
+            end_validation - start_validation,
+            end_validation - start_train,
+        )
+    )
 
     # Track best performance, and save the model's state
     if avg_vloss < best_vloss and save_model:
