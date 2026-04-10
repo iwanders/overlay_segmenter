@@ -2,6 +2,7 @@
 #
 #
 # https://docs.pytorch.org/tutorials/beginner/introyt/trainingyt.html#the-training-loop
+import json
 import time
 from datetime import datetime
 from pathlib import Path
@@ -111,6 +112,11 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 loss_fn = torch.nn.CrossEntropyLoss()
 
 
+def dump_stats(dir: Path, stats: dict):
+    with open(dir / "stats.json", "w") as f:
+        json.dump(stats, f, indent=2)
+
+
 def train_one_epoch(epoch_index):
     epoch_loss = 0.0
     count = 0
@@ -142,9 +148,9 @@ def train_one_epoch(epoch_index):
         # labels = labels.softmax(dim=1)
         # Compute the loss and its gradients
         loss = loss_fn(outputs, labels)
-        print("batch loss", float(loss))
         loss.backward()
-        epoch_loss += float(loss)
+        print("batch loss", float(loss.detach()))
+        epoch_loss += float(loss.detach())
 
         # Adjust learning weights
         optimizer.step()
@@ -163,17 +169,22 @@ def train_one_epoch(epoch_index):
     return epoch_loss / count
 
 
+stats = []
 save_model = True
 for epoch in range(EPOCHS):
-    print("EPOCH {}:".format(epoch_number + 1))
+    epoch_record = {}
+    print("EPOCH {}:".format(epoch))
+    epoch_record["epoch"] = epoch
 
     start_train = time.time()
     # Make sure gradient tracking is on, and do a pass over the data
     model.train(True)
     avg_loss = train_one_epoch(
-        epoch_number,
+        epoch,
     )
     end_train = time.time()
+    epoch_record["train_loss"] = avg_loss
+    epoch_record["train_time"] = end_train - start_train
 
     running_vloss = 0.0
     # Set the model to evaluation mode, disabling dropout and using population
@@ -231,6 +242,8 @@ for epoch in range(EPOCHS):
 
     end_validation = time.time()
     avg_vloss = running_vloss / (i + 1)
+    epoch_record["validation_time"] = end_validation - start_validation
+    epoch_record["validation_loss"] = float(avg_vloss.detach())
     print("LOSS train {} valid {}".format(avg_loss, avg_vloss))
     print(
         "Train: {:.3} s validation: {:.3} s total: {:.3} s".format(
@@ -239,6 +252,8 @@ for epoch in range(EPOCHS):
             end_validation - start_train,
         )
     )
+
+    stats.append(epoch_record)
 
     # Track best performance, and save the model's state
     if avg_vloss < best_vloss and save_model:
@@ -249,4 +264,5 @@ for epoch in range(EPOCHS):
         torch.save(model.state_dict(), model_path)
         print(f"saved model to {model_path}")
 
-    epoch_number += 1
+    dump_stats(epoch_dir, stats)
+    dump_stats(epoch_dir.parent, stats)
