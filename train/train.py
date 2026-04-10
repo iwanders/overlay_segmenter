@@ -30,7 +30,9 @@ else:
 
 print(f"Using device: {device}")
 
-
+torch.backends.cudnn.benchmark = False
+# torch.use_deterministic_algorithms(True)  < nll_loss2d_forward_out_cuda_template :/
+torch.manual_seed(3)
 # Currently, tile size needs to be smaller than the overlay tiles.
 # tile_size = (400, 400)
 tile_size = (256, 256)
@@ -49,7 +51,9 @@ train_generator = DatasetGenerator(
 )
 
 validation_rng = np.random.default_rng(43)
-validation_generator = train_generator.split_out_validation(0.1, rng=validation_rng)
+validation_generator = train_generator.split_out_validation(
+    ratio=0.1, rng=validation_rng
+)
 
 validation_set = []
 validation_set.extend(
@@ -98,7 +102,8 @@ epoch_number = 0
 EPOCHS = 10000
 
 best_vloss = 1_000_000.0
-
+model_seed = 3
+torch.manual_seed(model_seed)
 model = Unet(channels_in=3, channels_out=2)
 model.to(device)
 
@@ -192,6 +197,9 @@ for epoch in range(EPOCHS):
     model.eval()
 
     epoch_dir = Path(f"/tmp/train/{epoch:0>3}/")
+
+    if epoch > 100:
+        epoch_dir = Path("/tmp/train/latest/")
 
     start_validation = time.time()
     # Disable gradient computation and reduce memory consumption.

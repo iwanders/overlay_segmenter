@@ -207,11 +207,11 @@ class ImageLoader:
             img = self.load_image(f)
             filename = f.stem
             tensor_tracker.set_name(img, filename)
-            return img
+            return f, img
 
         with ThreadPoolExecutor() as executor:
             res = list(executor.map(load_img, to_load))
-            self._images.extend(res)
+            self._images.extend([img for _, img in sorted(res)])
 
     def images(self) -> list[Tensor]:
         return self._images
@@ -258,26 +258,20 @@ class DatasetGenerator:
         self._rng = rng
         self._tile_size = tile_size
         self._alpha_factor = alpha_factor
-        if self._rng is None:
-            self._rng = np.random.default_rng()
-
-        self._sample_entries = rng_shuffle(self._rng, self._sample_entries)
+        if self._sample_entries:
+            self._sample_entries = rng_shuffle(self._rng, self._sample_entries)
 
     def split_out_validation(
         self,
+        rng,
         ratio: float = 0.1,
-        rng: np.random.Generator | None = None,
     ) -> "DatasetGenerator":
-        validation = DatasetGenerator([])
+        validation = DatasetGenerator([], rng=rng)
         validation._device = self._device
         validation._batch_size = self._batch_size
         validation._batch_count = self._batch_count
         validation._tile_size = self._tile_size
         validation._alpha_factor = self._alpha_factor
-        if rng is None:
-            rng = np.random.default_rng()
-
-        validation._rng = rng
         total_bg = len(self._sample_entries)
         validation_bg_split = int(total_bg * ratio)
         validation_entries = self._sample_entries[0:validation_bg_split]
