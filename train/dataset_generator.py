@@ -344,7 +344,9 @@ class DatasetGenerator:
         return img[:, y : y + tile_size[1], x : x + tile_size[0]]
 
     @staticmethod
-    def image_overlay(background, foreground, b_x, b_y, f_x, f_y) -> Tensor:
+    def image_overlay(
+        background, foreground, b_x, b_y, f_x, f_y, return_overlay=False
+    ) -> Tensor:
         # We've selected the position in the canvas, and the position in the overlay.
         # next, we have to determine the rectangle in which the bounds overlap.
         # We will place the overlay coordinate onto the canvas coordinate.
@@ -379,17 +381,35 @@ class DatasetGenerator:
         fg_x1 = max(0, -x_offset)
         fg_x2 = fg_x1 + (x2 - x1)
 
+        if return_overlay:
+            mask = torch.zeros(
+                background.shape,
+                dtype=torch.float,
+            )
+
         # Handle two situations where the intersection is disjoint; ie; the overlay is outside of the bg.
         if y2 < y1 or x2 < x1:
+            if return_overlay:
+                return background, mask
             return background
 
         if fg_y2 < fg_y1 or fg_x2 < fg_x1:
+            if return_overlay:
+                return background, mask
             return background
 
         # Apply the overlay
-        background[:, y1:y2, x1:x2] = foreground[:, fg_y1:fg_y2, fg_x1:fg_x2]
+        if foreground.shape[0] == 4:
+            background[:, y1:y2, x1:x2] = foreground[:, fg_y1:fg_y2, fg_x1:fg_x2]
+        else:
+            background[0:3, y1:y2, x1:x2] = foreground[0:3, fg_y1:fg_y2, fg_x1:fg_x2]
+            background[3, :, :] = 1.0
+
+        if return_overlay:
+            mask[:, y1:y2, x1:x2] = foreground[:, fg_y1:fg_y2, fg_x1:fg_x2]
+            return background, mask
+
         return background
-        pass
 
     @staticmethod
     def stamp_tile(
@@ -517,10 +537,8 @@ class DistributionNormalInt(BaseModel):
     mean: float = 0.0
     # Sigma of the distribution.
     sigma: float = 4.0
-    # Whether to use the canvas dimensions
-    by_canvas: bool = True
-    # Whether to use our own dimensions.
-    by_self: bool = False
+    # Whether to use our own dimensions for scaling the distrubition, if false use canvas dimensions.
+    by_self: bool = True
 
 
 # A named group of data input.
@@ -573,7 +591,114 @@ class DataConfig(BaseModel):
     base_dir: Path = Path()
     applicators: dict[str, DataApplicator]
     inputs: dict[str, DataInput]
-    data: list[DataStack]
+    generator: list[DataStack]
+
+
+class Applicator:
+    def __init__(self, config: DataApplicator):
+        self._config = config
+
+    def __str__(self):
+        return f"<Applicator {self._config} at 0x{id(self):x}>"
+
+    def crop(self) -> tuple[int, int] | None:
+        return self._config.crop
+
+    def ratio(self) -> float:
+        return self._config.ratio
+
+    def _get_count(self, rng: np.random.Generator) -> int:
+        if type(self._config.count) is int:
+            return self._config.count
+        else:
+            raise NotImplementedError("do something with the uniform distribution")
+
+    @staticmethod
+    def _determine_pos(
+        rng: np.random.Generator,
+        config: Union[DistributionNormalInt, int],
+        value_self: int,
+        value_canvas: int,
+    ) -> int:
+        if type(config) is int:
+            return config
+
+        normal_config: DistributionNormalInt = config
+        # It must be a normal sampling.
+        scale = value_canvas
+        if normal_config.by_self:
+            scale = value_self
+
+        return int(rng.normal(loc=0.5, scale=normal_config.sigma) * scale)
+
+    def apply(
+        self,
+        rng: np.random.Generator,
+        canvas: Tensor,
+        overlays: list[Tensor],
+        return_mask: bool = False,
+    ) -> tuple[Tensor, Tensor | None]:
+        canvas = canvas
+        mask = None
+        for i in range(self._get_count(rng)):
+            overlay = rng_choice(rng, overlays)
+            o_height, o_width = overlay.shape[1:]
+            c_height, c_width = canvas.shape[1:]
+
+            sub_canvas = torch.zeros(
+                (4, canvas.shape[1], canvas.shape[2]), dtype=torch.float
+            )
+
+            o_x = self._determine_pos(rng, self._config.position_x, o_width, c_width)
+            o_y = self._determine_pos(rng, self._config.position_y, o_height, c_height)
+
+            c_x = int(c_width / 2)
+            c_y = int(c_height / 2)
+
+            overlay_and_mask = DatasetGenerator.image_overlay(
+                sub_canvas, overlay, c_x, c_y, o_x, o_y, return_overlay=return_mask
+            )
+            if return_mask:
+                sub_canvas, mask = overlay_and_mask
+            else:
+                sub_canvas = overlay_and_mask
+
+            fg_rgb = sub_canvas[:3]
+            fg_alpha = sub_canvas[3:]  # (1, H, W)
+            canvas = alpha_blend(fg_rgb, canvas[:3, :, :], fg_alpha)
+        return canvas, mask
+
+
+class DataGenerator:
+    def __init__(self, stack: list[tuple[Applicator, list[Tensor]]], config: DataStack):
+        self._stack = stack
+        self._config = config
+
+    def generate(self, rng: np.random.Generator) -> (Tensor, Tensor):
+        canvas = None
+        mask = None
+        for layer, (applicator, images) in enumerate(self._stack):
+            if canvas is None and applicator.crop() is None:
+                raise ValueError("Dont have a cropping first applicator")
+
+            if canvas is None:
+                canvas = torch.zeros(
+                    (4, applicator.crop()[0], applicator.crop()[1]), dtype=torch.float
+                )
+                canvas[3, :, :] = 1.0
+
+            # Check if this layer is supposed to apply.
+            if rng.random() >= applicator.ratio():
+                continue
+
+            if layer == self._config.mask_layer:
+                canvas, mask = applicator.apply(rng, canvas, images, return_mask=True)
+            else:
+                canvas, _ = applicator.apply(rng, canvas, images, return_mask=False)
+
+        # print(self._stack)
+        canvas = canvas[0:3, :, :].clone()
+        return canvas, mask
 
 
 class DataPipeline:
@@ -583,6 +708,8 @@ class DataPipeline:
         self._data_config = DataConfig.model_validate(d["config"])
         print(self._data_config)
         self.load_inputs()
+        self.load_applicators()
+        self.create_generators()
 
     def _substitute_path(self, path: Path) -> Path:
         path_as_str = str(path)
@@ -607,7 +734,6 @@ class DataPipeline:
                     else self._data_config.base_dir
                 )
                 full_dir = base_dir / subdir
-                print(full_dir)
 
                 this_set.extend(
                     loader.load_images(
@@ -615,8 +741,27 @@ class DataPipeline:
                     )
                 )
             self._inputs[name] = this_set
-        # for k, v in self._inputs.items():
-        #    print(k, v[0].shape)
+
+    def load_applicators(self):
+        self._applicators = {}
+        for name, applicator_config in self._data_config.applicators.items():
+            self._applicators[name] = Applicator(applicator_config)
+
+    def create_generators(self):
+        self._generators = []
+        for config in self._data_config.generator:
+            typed_stack = []
+            for applicator_name, collection_name in config.inputs:
+                applicator = self._applicators[applicator_name]
+                images = self._inputs[collection_name]
+                typed_stack.append((applicator, images))
+            generator = DataGenerator(typed_stack, config=config)
+            self._generators.append(generator)
+
+    def generate_with_generator(
+        self, index: int, rng: np.random.Generator
+    ) -> (Tensor, Tensor):
+        return self._generators[index].generate(rng)
 
 
 def test_new_spec():
@@ -625,6 +770,17 @@ def test_new_spec():
     config_file = "dataset.priv.yaml"
     z = DataPipeline(config_file)
     print(z)
+    rng = np.random.default_rng(3)
+    generated = []
+    for i in range(10):
+        a = z.generate_with_generator(0, rng)
+        generated.append(a)
+    output = Path("/tmp/")
+    for i, (sample_img, sample_mask) in enumerate(generated):
+        torchvision.utils.save_image(sample_img, output / f"sample_{i}_img.png")
+        torchvision.utils.save_image(
+            sample_mask.to(torch.float), output / f"sample_{i}_mask.png"
+        )
     sys.exit(0)
 
 
