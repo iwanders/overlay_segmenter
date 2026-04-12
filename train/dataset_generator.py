@@ -85,13 +85,13 @@ class DataLoader:
                 if fg_subdir not in self._fg_images:
                     self._fg_images[fg_subdir] = ImageLoader.foreground_loader(
                         fg_dir / fg_subdir
-                    ).images()
+                    )
 
             for bg_subdir in data_pairs.background_subdir:
                 if bg_subdir not in self._bg_images:
                     self._bg_images[bg_subdir] = ImageLoader.background_loader(
                         bg_dir / bg_subdir
-                    ).images()
+                    )
 
         for data_pair in self._spec.data_pair:
             load_datapair(data_pair)
@@ -165,12 +165,11 @@ class ImageLoader:
         self,
         crop_top_left: None | tuple[int, int] = None,
         crop_size: None | tuple[int, int] = None,
-        device="cpu",
+        device: torch.device | str = "cpu",
         remove_alpha=False,
     ):
         self._crop_top_left = crop_top_left
         self._crop_size = crop_size
-        self._images = []
         self._device = device
         self._remove_alpha = remove_alpha
 
@@ -183,14 +182,12 @@ class ImageLoader:
         if "remove_alpha" not in kwargs:
             kwargs["remove_alpha"] = True
         v = ImageLoader(**kwargs)
-        v.load_images(image_dir)
-        return v
+        return v.load_images(image_dir)
 
     @staticmethod
     def foreground_loader(image_dir, **kwargs):
         v = ImageLoader(**kwargs)
-        v.load_images(image_dir)
-        return v
+        return v.load_images(image_dir)
 
     def load_image(self, d):
         image = load_image_file(d, device=self._device)
@@ -214,7 +211,7 @@ class ImageLoader:
                 image = image[0:3, :, :]
         return image
 
-    def load_images(self, image_dir: Path):
+    def load_images(self, image_dir: Path) -> list[Tensor]:
         to_load = list(image_dir.rglob("*.png"))
 
         def load_img(f):
@@ -225,10 +222,7 @@ class ImageLoader:
 
         with ThreadPoolExecutor() as executor:
             res = list(executor.map(load_img, to_load))
-            self._images.extend([img for _, img in sorted(res)])
-
-    def images(self) -> list[Tensor]:
-        return self._images
+            return [img for _, img in sorted(res)]
 
 
 class DatasetGenerator:
@@ -590,31 +584,39 @@ class DataPipeline:
         print(self._data_config)
         self.load_inputs()
 
+    def _substitute_path(self, path: Path) -> Path:
+        path_as_str = str(path)
+        return Path(path_as_str.format(base_dir=self._data_config.base_dir))
+
     def load_inputs(self):
         self._inputs = {}
         for name, input_group in self._data_config.inputs.items():
             print(name, input_group)
             this_set = []
+            loader = ImageLoader(
+                crop_top_left=input_group.top_left,
+                crop_size=input_group.size,
+                remove_alpha=input_group.remove_alpha,
+                device=lookup_device(input_group.device),
+            )
 
             for subdir in input_group.dirs:
                 base_dir = (
-                    input_group.base_dir
+                    self._substitute_path(input_group.base_dir)
                     if input_group.base_dir is not None
                     else self._data_config.base_dir
                 )
                 full_dir = base_dir / subdir
                 print(full_dir)
-                loader = ImageLoader(
-                    full_dir,
-                    crop_top_left=input_group.top_left,
-                    crop_size=input_group.size,
-                    remove_alpha=input_group.remove_alpha,
-                    device=lookup_device(input_group.device),
+
+                this_set.extend(
+                    loader.load_images(
+                        full_dir,
+                    )
                 )
-                loader.load_images()
-                this_set.extend(loader.images())
             self._inputs[name] = this_set
-            print(self._inputs)
+        # for k, v in self._inputs.items():
+        #    print(k, v[0].shape)
 
 
 def test_new_spec():
