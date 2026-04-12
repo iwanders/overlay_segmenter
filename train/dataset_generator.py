@@ -4,6 +4,7 @@
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any, Union
 
 import numpy as np
 import torch
@@ -114,7 +115,7 @@ def alpha_blend(fg, bg, alpha):
     return bg + alpha * (fg - bg)
 
 
-def augment_jpg_roundtrip(img, quality=20):
+def augment_jpg_roundtrip(img, quality=50):
     desired_device = img.device
     # print(desired_device)
     # Go from floats to u8
@@ -428,13 +429,16 @@ class DatasetGenerator:
         def create_tile(rng):
             (bg, fg_options) = rng_choice(rng, self._sample_entries)
             fg = rng_choice(rng, fg_options)
-            return DatasetGenerator.create_tile(
+
+            (img, mask) = DatasetGenerator.create_tile(
                 rng=self._rng,
                 bg=bg,
                 fg=fg,
                 alpha_factor=self._alpha_factor,
                 tile_size=self._tile_size,
             )
+            # img = augment_jpg_roundtrip(img)
+            return (img, mask)
 
         # with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         #     rngs = [np.random.default_rng(seed=seed + t) for t in range(count)]
@@ -495,8 +499,93 @@ def test_image_overlay():
     sys.exit(1)
 
 
+# Newfangled data pipeline
+class DistributionUniformInt(BaseModel):
+    min: int = 1
+    max: int = 1
+
+
+class DistributionNormalInt(BaseModel):
+    # Mean of the distribution, 0 is center.
+    mean: float = 0.0
+    # Sigma of the distribution.
+    sigma: float = 4.0
+    # Whether to use the canvas dimensions
+    by_canvas: bool = True
+    # Whether to use our own dimensions.
+    by_self: bool = False
+
+
+# A named group of data input.
+class DataInput(BaseModel):
+    base_dir: str | None = None
+    dirs: list[str]
+    augmentations: list[str] = []
+    pattern: str = "*.png"
+    top_left: tuple[int, int] = (0, 0)
+    bottom_right: tuple[int, int] = (-1, -1)
+
+
+class DataApplicator(BaseModel):
+    # Ratio of data samples to apply this to.
+    ratio: float = 1.0
+    # Count to apply when this is applied.
+    count: Union[int, DistributionUniformInt] = 1
+    # Whether applications can overlap.
+    overlap: bool = False
+    # Position to place this.
+    position_x: Union[DistributionNormalInt, int] = 0
+    position_y: Union[DistributionNormalInt, int] = 0
+
+    # Crop the applied image to this size, if the first image, this determines the canvas size.
+    crop: Union[None, tuple[int, int]] = None
+
+
+class DataPostprocess(BaseModel):
+    # Name of the postprocessing function.
+    name: str
+    # Configuration for the postprocessing function
+    config: Any
+    # Ratio to which this postprocessing function is applied.
+    ratio: float = 1.0
+
+
+class DataStack(BaseModel):
+    # List of inputs, (key of DataApplicator, key of DataInput)
+    inputs: list[tuple[str, str]]
+    # The layer that will make the mask.
+    mask_layer: int = 1
+    mask_alpha: float = 0.5
+    # List of postprocessing actions, mapping to DataPostprocess
+    postprocess: list[str] = []
+
+
+class DataConfig(BaseModel):
+    base_dir: str = ""
+    applicators: dict[str, DataApplicator]
+    inputs: dict[str, DataInput]
+    data: list[DataStack]
+
+
+class DataPipeline:
+    def __init__(self, config_file):
+        with open(config_file) as f:
+            d = yaml.safe_load(f)
+        z = DataConfig.model_validate(d["config"])
+
+
+def test_new_spec():
+    import sys
+
+    config_file = "dataset.priv.yaml"
+    z = DataPipeline(config_file)
+    print(z)
+    sys.exit(0)
+
+
 if __name__ == "__main__":
     # test_image_overlay()
+    test_new_spec()
 
     l = DataLoader("dataset.priv.yaml")
     print()
