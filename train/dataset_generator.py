@@ -589,14 +589,16 @@ class DataStack(BaseModel):
 
 class DataConfig(BaseModel):
     base_dir: Path = Path()
+    process_device: str = "auto"
     applicators: dict[str, DataApplicator]
     inputs: dict[str, DataInput]
     generator: list[DataStack]
 
 
 class Applicator:
-    def __init__(self, config: DataApplicator):
+    def __init__(self, config: DataApplicator, device: torch.device):
         self._config = config
+        self._device = device
 
     def __str__(self):
         return f"<Applicator {self._config} at 0x{id(self):x}>"
@@ -652,7 +654,9 @@ class Applicator:
             c_height, c_width = canvas.shape[1:]
 
             sub_canvas = torch.zeros(
-                (4, canvas.shape[1], canvas.shape[2]), dtype=torch.float
+                (4, canvas.shape[1], canvas.shape[2]),
+                dtype=torch.float,
+                device=self._device,
             )
 
             o_x = self._determine_pos(rng, self._config.position_x, o_width, c_width)
@@ -676,9 +680,15 @@ class Applicator:
 
 
 class DataGenerator:
-    def __init__(self, stack: list[tuple[Applicator, list[Tensor]]], config: DataStack):
+    def __init__(
+        self,
+        stack: list[tuple[Applicator, list[Tensor]]],
+        config: DataStack,
+        device: torch.device,
+    ):
         self._stack = stack
         self._config = config
+        self._device = device
 
     def generate(self, rng: np.random.Generator) -> (Tensor, Tensor):
         canvas = None
@@ -689,7 +699,9 @@ class DataGenerator:
 
             if canvas is None:
                 canvas = torch.zeros(
-                    (4, applicator.crop()[0], applicator.crop()[1]), dtype=torch.float
+                    (4, applicator.crop()[0], applicator.crop()[1]),
+                    dtype=torch.float,
+                    device=self._device,
                 )
                 canvas[3, :, :] = 1.0
 
@@ -713,6 +725,7 @@ class DataPipeline:
             d = yaml.safe_load(f)
         self._data_config = DataConfig.model_validate(d["config"])
         print(self._data_config)
+        self._device = lookup_device(self._data_config.process_device)
         self.load_inputs()
         self.input_augment()
         self.load_applicators()
@@ -722,10 +735,15 @@ class DataPipeline:
         path_as_str = str(path)
         return Path(path_as_str.format(base_dir=self._data_config.base_dir))
 
+    def print_inputs(self):
+        for name, images in self._inputs.items():
+            print(
+                f"Inputs: {name} has {len(images)} images with {images[0].shape} size on {images[0].device}"
+            )
+
     def load_inputs(self):
         self._inputs = {}
         for name, input_group in self._data_config.inputs.items():
-            print(name, input_group)
             this_set = []
             loader = ImageLoader(
                 crop_top_left=input_group.top_left,
@@ -762,7 +780,7 @@ class DataPipeline:
     def load_applicators(self):
         self._applicators = {}
         for name, applicator_config in self._data_config.applicators.items():
-            self._applicators[name] = Applicator(applicator_config)
+            self._applicators[name] = Applicator(applicator_config, device=self._device)
 
     def create_generators(self):
         self._generators = []
@@ -772,7 +790,7 @@ class DataPipeline:
                 applicator = self._applicators[applicator_name]
                 images = self._inputs[collection_name]
                 typed_stack.append((applicator, images))
-            generator = DataGenerator(typed_stack, config=config)
+            generator = DataGenerator(typed_stack, config=config, device=self._device)
             self._generators.append(generator)
 
     def generate_with_generator(
@@ -789,6 +807,8 @@ def test_new_spec():
     print(z)
     rng = np.random.default_rng(3)
     generated = []
+
+    z.print_inputs()
     for i in range(10):
         a = z.generate_with_generator(0, rng)
         generated.append(a)
