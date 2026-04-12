@@ -539,6 +539,12 @@ class DistributionUniformInt(BaseModel):
     max: int = 1
 
 
+# Newfangled data pipeline
+class DistributionUniformFloat(BaseModel):
+    min: float = 0.0
+    max: float = 1.0
+
+
 class DistributionNormalInt(BaseModel):
     # Mean of the distribution, 0 is center.
     mean: float = 0.0
@@ -571,6 +577,8 @@ class DataApplicator(BaseModel):
     # Position to place this.
     position_x: Union[DistributionNormalInt, int] = 0
     position_y: Union[DistributionNormalInt, int] = 0
+
+    blend_alpha: Union[DistributionUniformFloat, float] = 1.0
 
     # Crop the applied image to this size, if the first image, this determines the canvas size.
     crop: Union[None, tuple[int, int]] = None
@@ -636,6 +644,7 @@ class PostprocessJpg(PostProcess):
 class DataStack(BaseModel):
     # List of inputs, (key of DataApplicator, key of DataInput)
     inputs: list[tuple[str, str]]
+    for_input_keys: dict[str, list[str]] = {"__dumy__": ["__DUMMY__"]}
     # The layer that will make the mask.
     mask_layer: int = 1
     mask_alpha: float = 0.5
@@ -670,7 +679,7 @@ class Applicator:
         if type(self._config.count) is int:
             return self._config.count
         else:
-            raise NotImplementedError("do something with the uniform distribution")
+            return int(rng.uniform(self._config.count.min, self._config.count.max))
 
     @staticmethod
     def _determine_pos(
@@ -696,6 +705,14 @@ class Applicator:
             rng.normal(loc=normal_config.mean, scale=normal_config.sigma) * scale
             + offset
         )
+
+    @staticmethod
+    def _determine_blend_alpha(
+        rng: np.random.Generator, config: Union[DistributionUniformFloat, float]
+    ) -> float:
+        if type(config) is float:
+            return config
+        return float(rng.uniform(config.min, config.max))
 
     def apply(
         self,
@@ -731,8 +748,10 @@ class Applicator:
             else:
                 sub_canvas = overlay_and_mask
 
+            blend_alpha = self._determine_blend_alpha(rng, self._config.blend_alpha)
+
             fg_rgb = sub_canvas[:3]
-            fg_alpha = sub_canvas[3:]  # (1, H, W)
+            fg_alpha = sub_canvas[3:] * blend_alpha  # (1, H, W)
             canvas = alpha_blend(fg_rgb, canvas[:3, :, :], fg_alpha)
         return canvas, mask
 
@@ -902,22 +921,34 @@ class DataPipeline:
     def create_generators(self):
         self._generators: list[DataGenerator] = []
         for config in self._data_config.generator:
-            typed_stack = []
-            for applicator_name, collection_name in config.inputs:
-                applicator = self._applicators[applicator_name]
-                images = self._inputs[collection_name]
-                typed_stack.append((applicator, images))
-            # Collect postprocessors
-            post_processors = []
-            for post_process_name in config.post_process:
-                post_processors.append(self._postprocess[post_process_name])
-            generator = DataGenerator(
-                typed_stack,
-                config=config,
-                device=self._device,
-                post_processors=post_processors,
-            )
-            self._generators.append(generator)
+            # Verify that all for_input_keys entries are the same length.
+            entry_length = len(list(config.for_input_keys.values())[0])
+            for label, values in config.for_input_keys.items():
+                if len(values) != entry_length:
+                    raise ValueError(
+                        f"for_input_keys lengths not equal to each other in {label}"
+                    )
+
+            for index in range(entry_length):
+                substitutions = {k: v[index] for k, v in config.for_input_keys.items()}
+                typed_stack = []
+                for applicator_name, collection_name in config.inputs:
+                    applicator_name = applicator_name.format(**substitutions)
+                    collection_name = collection_name.format(**substitutions)
+                    applicator = self._applicators[applicator_name]
+                    images = self._inputs[collection_name]
+                    typed_stack.append((applicator, images))
+                # Collect postprocessors
+                post_processors = []
+                for post_process_name in config.post_process:
+                    post_processors.append(self._postprocess[post_process_name])
+                generator = DataGenerator(
+                    typed_stack,
+                    config=config,
+                    device=self._device,
+                    post_processors=post_processors,
+                )
+                self._generators.append(generator)
 
     def calculate_generator_weights(self):
         # Calculate this based on the first layer input count.
@@ -930,10 +961,10 @@ class DataPipeline:
 
     def generate_with_generator(
         self, index: int, rng: np.random.Generator
-    ) -> (Tensor, Tensor):
+    ) -> tuple[Tensor, Tensor]:
         return self._generators[index].generate(rng)
 
-    def generate(self, rng: np.random.Generator) -> (Tensor, Tensor):
+    def generate(self, rng: np.random.Generator) -> tuple[Tensor, Tensor]:
         choice = rng.choice(range(len(self._generators)), p=self._generator_weights)
         return self._generators[choice].generate(rng)
 
