@@ -100,6 +100,7 @@ model.to(device)
 # optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
 # learning_rate = 0.001  # for batch size of 4. Works well, plateau at 300, but saw one spike.
 learning_rate = 0.0005  # for batch size of 4.
+learning_rate = 0.00025  # Lowering it because data is more complex now.
 # learning_rate = 0.005
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 

@@ -22,9 +22,10 @@ import torch.nn as nn
 
 
 class Unet(nn.Module):
-    def __init__(self, channels_in=3, channels_out=2):
+    def __init__(self, channels_in=3, channels_out=2, use_upconv=True):
         super().__init__()
         self._channels_out = channels_out
+        self._use_upconv = use_upconv
 
         def conv_block(in_channels, out_channels):
             return nn.Sequential(
@@ -55,25 +56,44 @@ class Unet(nn.Module):
         # Now we have up-conv 2x2, but some people just use upsample?
         # self.upsample = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
 
-        # self.decoder_up_level4 = nn.ConvTranspose2d(1024, 512, kernel_size=2, stride=2)
-        self.decoder_up_level4 = nn.Upsample(
-            scale_factor=2, mode="bilinear", align_corners=True
-        )
+        if use_upconv:
+            self.decoder_up_level4 = nn.ConvTranspose2d(
+                1024, 1024, kernel_size=2, stride=2
+            )
+        else:
+            self.decoder_up_level4 = nn.Upsample(
+                scale_factor=2, mode="bilinear", align_corners=True
+            )
         self.decoder_conv_4 = conv_block(512 + 1024, 512)
 
-        self.decoder_up_level3 = nn.Upsample(
-            scale_factor=2, mode="bilinear", align_corners=True
-        )
+        if use_upconv:
+            self.decoder_up_level3 = nn.ConvTranspose2d(
+                512, 512, kernel_size=2, stride=2
+            )
+        else:
+            self.decoder_up_level3 = nn.Upsample(
+                scale_factor=2, mode="bilinear", align_corners=True
+            )
         self.decoder_conv_3 = conv_block(256 + 512, 256)
 
-        self.decoder_up_level2 = nn.Upsample(
-            scale_factor=2, mode="bilinear", align_corners=True
-        )
+        if use_upconv:
+            self.decoder_up_level2 = nn.ConvTranspose2d(
+                256, 256, kernel_size=2, stride=2
+            )
+        else:
+            self.decoder_up_level2 = nn.Upsample(
+                scale_factor=2, mode="bilinear", align_corners=True
+            )
         self.decoder_conv_2 = conv_block(128 + 256, 128)
 
-        self.decoder_up_level1 = nn.Upsample(
-            scale_factor=2, mode="bilinear", align_corners=True
-        )
+        if use_upconv:
+            self.decoder_up_level1 = nn.ConvTranspose2d(
+                128, 128, kernel_size=2, stride=2
+            )
+        else:
+            self.decoder_up_level1 = nn.Upsample(
+                scale_factor=2, mode="bilinear", align_corners=True
+            )
         self.decoder_conv_1 = conv_block(64 + 128, 64)
 
         # And then we have a conv 1x1, why does this have 2 channels out??
@@ -105,6 +125,7 @@ class Unet(nn.Module):
 
         # Now the decoder, here we concatenate with the skip levels.
         upsample_for_decode_level_4 = self.decoder_up_level4(output_bottleneck)
+
         input_decode_level_4 = torch.cat(
             [upsample_for_decode_level_4, encoded_level_4], dim=1
         )
@@ -139,6 +160,8 @@ class Unet(nn.Module):
 
 
 if __name__ == "__main__":
+    import sys
+
     batch_size = 1
     input_channels = 3
     output_channels = 2
@@ -154,6 +177,7 @@ if __name__ == "__main__":
     print(f"Input shape: {im.shape}", im[:, 0:3, 0:3])
     print(f"Output shape: {x.shape}", x[:, 0:3, 0:3])
 
+    sys.exit(0)
     # torch.Size([4, 3, 584, 565])
     model = Unet(channels_in=3, channels_out=1)
     # im = torch.randn(4, 3, 584, 565)

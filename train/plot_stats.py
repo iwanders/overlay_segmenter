@@ -18,6 +18,7 @@ if __name__ == "__main__":
 
     plt.xlabel("Epochs")
     plt.ylabel("loss")
+    plt.ylim([0.0, 0.4])
     plt.title("Training Loss")
 
     epoch_interval = np.array(epoch)
