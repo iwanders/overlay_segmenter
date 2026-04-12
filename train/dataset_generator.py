@@ -625,11 +625,17 @@ class Applicator:
 
         normal_config: DistributionNormalInt = config
         # It must be a normal sampling.
+        offset = 0
         scale = value_canvas
         if normal_config.by_self:
             scale = value_self
+        else:
+            offset = -value_canvas / 2
 
-        return int(rng.normal(loc=0.5, scale=normal_config.sigma) * scale)
+        return int(
+            rng.normal(loc=normal_config.mean, scale=normal_config.sigma) * scale
+            + offset
+        )
 
     def apply(
         self,
@@ -708,6 +714,7 @@ class DataPipeline:
         self._data_config = DataConfig.model_validate(d["config"])
         print(self._data_config)
         self.load_inputs()
+        self.input_augment()
         self.load_applicators()
         self.create_generators()
 
@@ -741,6 +748,16 @@ class DataPipeline:
                     )
                 )
             self._inputs[name] = this_set
+
+    def input_augment(self):
+        for name, input_group in self._data_config.inputs.items():
+            these_images = self._inputs[name]
+            new_images = []
+            for augmentation in input_group.augmentations:
+                if augmentation == "flip_horizontal":
+                    for img in these_images:
+                        new_images.append(torch.flip(img, [2]))
+            self._inputs[name].extend(new_images)
 
     def load_applicators(self):
         self._applicators = {}
