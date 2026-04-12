@@ -193,7 +193,7 @@ class ImageLoader:
         image = load_image_file(d, device=self._device)
         left, top = (0, 0) if self._crop_top_left is None else self._crop_top_left
         width, height = (
-            (image.shape[1] - left, image.shape[2] - top)
+            (image.shape[2] - left, image.shape[1] - top)
             if self._crop_size is None
             else self._crop_size
         )
