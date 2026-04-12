@@ -558,6 +558,7 @@ class DataInput(BaseModel):
     top_left: tuple[int, int] | None = None
     size: tuple[int, int] | None = None
     device: str = "auto"
+    validation_split: bool = False
 
 
 class DataApplicator(BaseModel):
@@ -791,18 +792,46 @@ class DataGenerator:
 
 
 class DataPipeline:
-    def __init__(self, config_file):
-        with open(config_file) as f:
-            d = yaml.safe_load(f)
-        self._data_config = DataConfig.model_validate(d["config"])
-        print(self._data_config)
-        self._device = lookup_device(self._data_config.process_device)
-        self.load_inputs()
+    def __init__(self, config_file: Path | None = None, full_init=True):
+        if config_file is not None:
+            with open(config_file) as f:
+                d = yaml.safe_load(f)
+            self._data_config = DataConfig.model_validate(d["config"])
+            print(self._data_config)
+            self._device = lookup_device(self._data_config.process_device)
+            self.load_inputs()
+
+        if full_init:
+            self.post_image_init()
+
+    def post_image_init(self):
         self.input_augment()
         self.load_applicators()
         self.load_postprocess()
         self.create_generators()
         self.calculate_generator_weights()
+
+    def split_validation(self, rng: np.random.Generator, ratio=0.1) -> "DataPipeline":
+        # Split the images for all images in validation_split
+        validation_pipeline = DataPipeline(full_init=False)
+        validation_pipeline._data_config = self._data_config
+        validation_pipeline._device = self._device
+        validation_pipeline._inputs = {}
+        for name, input_group in self._data_config.inputs.items():
+            if input_group.validation_split:
+                images = self._inputs[name][:]
+                images = rng_shuffle(rng, images)
+
+                total_bg = len(images)
+                validation_bg_split = int(total_bg * ratio)
+                validation_entries = images[0:validation_bg_split]
+                self._inputs[name] = images[validation_bg_split + 1 :]
+                validation_pipeline._inputs[name] = validation_entries
+            else:
+                validation_pipeline._inputs[name] = self._inputs[name]
+
+        validation_pipeline.post_image_init()
+        return validation_pipeline
 
     def _substitute_path(self, path: Path) -> Path:
         path_as_str = str(path)
