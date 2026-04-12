@@ -3,6 +3,7 @@ import json
 import sys
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 if __name__ == "__main__":
     with open(sys.argv[1]) as f:
@@ -18,6 +19,18 @@ if __name__ == "__main__":
     plt.xlabel("Epochs")
     plt.ylabel("loss")
     plt.title("Training Loss")
+
+    epoch_interval = np.array(epoch)
+    time_interval = np.array([x["elapsed_time"] for x in d])
+
+    def forward(epoch):
+        return np.interp(epoch, epoch_interval, time_interval)
+
+    def inverse(time):
+        return np.interp(time, time_interval, epoch_interval)
+
+    secax = plt.gca().secondary_xaxis("top", functions=(forward, inverse))
+    secax.set_xlabel("train time [s]")
     plt.legend()  # Displays the labels
     # plt.show()
     plt.savefig("/tmp/stats.svg")

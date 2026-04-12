@@ -63,11 +63,7 @@ if True:
         torchvision.utils.save_image([img, torch.stack([mask, mask, mask])], out_path)
 
 
-BATCH_SIZE_LOOKUP = {
-    (3, 256, 256): 12,  # 6.9 GB of vram
-}
 resolution = tuple(validation_set[0][0].shape)
-batch_size = BATCH_SIZE_LOOKUP.get(resolution, 4)
 # Larger batches (no change to learning rate) is not actually better?
 batch_size = 4
 
@@ -170,6 +166,7 @@ def train_one_epoch(epoch_index):
 
 stats = []
 save_model = True
+start_time = time.time()
 for epoch in range(EPOCHS):
     epoch_record = {}
     print("EPOCH {}:".format(epoch))
@@ -246,12 +243,15 @@ for epoch in range(EPOCHS):
     avg_vloss = running_vloss / (i + 1)
     epoch_record["validation_time"] = end_validation - start_validation
     epoch_record["validation_loss"] = float(avg_vloss.detach())
-    print("LOSS train {} valid {}".format(avg_loss, avg_vloss))
+    elapsed_time = float(time.time() - start_time)
+    epoch_record["elapsed_time"] = elapsed_time
+    print(f"LOSS train {avg_loss} valid {avg_vloss}")
     print(
-        "Train: {:.3} s validation: {:.3} s total: {:.3} s".format(
+        "Train: {:.3} s validation: {:.3} s total: {:.3} s  elapsed {:.3}".format(
             end_train - start_train,
             end_validation - start_validation,
             end_validation - start_train,
+            elapsed_time,
         )
     )
 
