@@ -782,7 +782,7 @@ class DataGenerator:
             canvas = post_processor.apply(rng, canvas)
 
         # Perform the masking.
-        mask = (mask[3, :, :] >= self._config.mask_alpha).unsqueeze(0)
+        mask = mask[3, :, :] >= self._config.mask_alpha
         mask = mask.to(torch.int64)
 
         return canvas, mask
@@ -958,9 +958,11 @@ def test_new_spec():
         a = z.generate(rng)
         generated.append(a)
 
-    batch_generator = DynamicGenerator(batch_generator=z.batch_generator_fun(rng))
+    batch_generator = DynamicGenerator(
+        batch_generator=z.batch_generator_fun(rng), batch_size=4
+    )
     rollout_gen = iter(batch_generator)
-    generated = [z for z in rollout_gen]
+    generated = [(img, mask.unsqueeze(1)) for img, mask in rollout_gen]
 
     output = Path("/tmp/")
     for i, (sample_img, sample_mask) in enumerate(generated):

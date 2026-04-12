@@ -41,26 +41,17 @@ alpha_factor = 0.5
 # training_set = []
 validation_set = []
 
-training_generators = []
+from dataset_generator import DataPipeline
 
-train_rng = np.random.default_rng(41)
-loader = DataLoader("dataset.priv.yaml")
-print()
-train_generator = DatasetGenerator(
-    data_pairs=loader.generate_data_pairs(), rng=train_rng, alpha_factor=alpha_factor
-)
+config_file = "dataset.priv.yaml"
+train_pipeline = DataPipeline(config_file=config_file, full_init=False)
+rng = np.random.default_rng(3)
 
-validation_rng = np.random.default_rng(43)
-validation_generator = train_generator.split_out_validation(
-    ratio=0.1, rng=validation_rng
-)
+validation_pipeline = train_pipeline.split_validation(rng=rng, ratio=0.1)
+train_pipeline.post_image_init()
 
-validation_set = []
-validation_set.extend(
-    validation_generator.generate(
-        count=30,
-    )
-)
+
+validation_set = [train_pipeline.generate(rng) for _ in range(50)]
 validation_set = [(a.to(device), b.to(device)) for a, b in validation_set]
 
 
@@ -85,12 +76,11 @@ validation_loader = torch.utils.data.DataLoader(
     validation_set, batch_size=batch_size, shuffle=False
 )
 
-training_gen = train_generator
 
 batch_count = 20
 
 dynamic_training_gen = DynamicGenerator(
-    training_gen.batch_generator(),
+    batch_generator=train_pipeline.batch_generator_fun(rng),
     batch_count=batch_count,
     batch_size=batch_size,
     device=device,
