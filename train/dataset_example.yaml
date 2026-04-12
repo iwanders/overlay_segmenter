@@ -1,0 +1,83 @@
+_data_meta: &data_meta
+    mask_layer: 1
+    mask_alpha: 0.5
+
+_post_process: &post_process
+    - fine_blur
+    - jpeg
+
+_bg_input: &bg_input
+    remove_alpha: true
+    base_dir: "{base_dir}/background/"
+    top_left: [105, 27]
+    size: [1700, 825]
+    augmentations: [flip_horizontal]
+    device: cpu
+    validation_split: true
+
+_fg_input: &fg_input
+    remove_alpha: false
+    base_dir: "{base_dir}/foreground/"
+
+config:
+    base_dir: "../../datasets/"
+    post_process:
+        fine_blur:
+            function: blur
+            config:
+                min: 0.0
+                max: 5.0
+            ratio: 0.3
+        jpeg:
+            function: jpg
+            config:
+                min: 30
+                max: 100
+            ratio: 0.3
+
+    applicators:
+        bg_applicator:
+            ratio: 1.0
+            position_x: { mean: 0.5, sigma: 0.15, by_self: true }
+            position_y: { mean: 0.5, sigma: 0.15, by_self: true }
+            crop: [256, 256]
+        fg_applicator:
+            ratio: 1.0
+            position_x: { mean: 0.5, sigma: 0.4, by_self: true }
+            position_y: { mean: 0.5, sigma: 0.4, by_self: true }
+            blend_alpha:
+                min: 0.3
+                max: 0.5
+        unit_applicator:
+            ratio: 1.0
+            position_x: { mean: 0.5, sigma: 0.4, by_self: false }
+            position_y: { mean: 0.5, sigma: 0.4, by_self: false }
+            count:
+                min: 0
+                max: 3
+    inputs:
+        bg_LevelOne:
+            dirs: [Act1/LevelOne]
+            <<: *bg_input
+        fg_LevelOne:
+            dirs: [Act1/LevelOne]
+            <<: *fg_input
+        bg_LevelTwo:
+            dirs: [Act1/LevelTwo]
+            <<: *bg_input
+        fg_LevelTwo:
+            dirs: [Act1/LevelTwo]
+            <<: *fg_input
+        map_units:
+            dirs: [units]
+            remove_alpha: false
+            base_dir: "{base_dir}/disturbance/"
+    generator:
+        - inputs:
+              - [bg_applicator, "bg_{label}"]
+              - [fg_applicator, "fg_{label}"]
+              - [unit_applicator, map_units]
+          for_input_keys:
+              label: [LevelOne, LevelTwo]
+          <<: *data_meta
+          post_process: *post_process
