@@ -2,6 +2,7 @@
 #
 
 import time
+from abc import abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Union
@@ -570,11 +571,55 @@ class DataApplicator(BaseModel):
 
 class DataPostprocess(BaseModel):
     # Name of the postprocessing function.
-    name: str
+    function: str
     # Configuration for the postprocessing function
     config: Any
     # Ratio to which this postprocessing function is applied.
     ratio: float = 1.0
+
+
+class PostProcess:
+    def __init__(self, ratio):
+        self._ratio = ratio
+
+    def should_apply(self, rng: np.random.Generator) -> bool:
+        return rng.random() <= self._ratio
+
+    @abstractmethod
+    def apply(self, rng: np.random.Generator, tensor: Tensor) -> Tensor:
+        pass
+
+
+class PostprocessBlur(PostProcess):
+    def __init__(self, config, ratio):
+        super().__init__(ratio)
+        self._min = config["min"]
+        self._max = config["max"]
+
+    def apply(self, rng: np.random.Generator, tensor: Tensor) -> Tensor:
+        if not self.should_apply(rng):
+            return tensor
+
+        blur_size = rng.uniform(self._min, self._max)
+
+        res = torchvision.transforms.functional.gaussian_blur(
+            tensor, int(blur_size * 2), sigma=blur_size
+        )
+        return res.to(tensor.device)
+
+
+class PostprocessJpg(PostProcess):
+    def __init__(self, config, ratio):
+        super().__init__(ratio)
+        self._min = config["min"]
+        self._max = config["max"]
+
+    def apply(self, rng: np.random.Generator, tensor: Tensor) -> Tensor:
+        if not self.should_apply(rng):
+            return tensor
+        quality = rng.integers(self._min, self._max)
+        res = augment_jpg_roundtrip(tensor, quality)
+        return res.to(tensor.device)
 
 
 class DataStack(BaseModel):
@@ -584,7 +629,7 @@ class DataStack(BaseModel):
     mask_layer: int = 1
     mask_alpha: float = 0.5
     # List of postprocessing actions, mapping to DataPostprocess
-    postprocess: list[str] = []
+    post_process: list[str] = []
 
 
 class DataConfig(BaseModel):
@@ -593,6 +638,7 @@ class DataConfig(BaseModel):
     applicators: dict[str, DataApplicator]
     inputs: dict[str, DataInput]
     generator: list[DataStack]
+    post_process: dict[str, DataPostprocess]
 
 
 class Applicator:
@@ -632,7 +678,8 @@ class Applicator:
         if normal_config.by_self:
             scale = value_self
         else:
-            offset = -value_canvas / 2
+            # This centers it >_<
+            offset = -value_canvas / 2 + value_self / 2
 
         return int(
             rng.normal(loc=normal_config.mean, scale=normal_config.sigma) * scale
@@ -685,10 +732,12 @@ class DataGenerator:
         stack: list[tuple[Applicator, list[Tensor]]],
         config: DataStack,
         device: torch.device,
+        post_processors: list[PostProcess],
     ):
         self._stack = stack
         self._config = config
         self._device = device
+        self._post_processors = post_processors
 
     def generate(self, rng: np.random.Generator) -> (Tensor, Tensor):
         canvas = None
@@ -714,8 +763,13 @@ class DataGenerator:
             else:
                 canvas, _ = applicator.apply(rng, canvas, images, return_mask=False)
 
-        # print(self._stack)
+        # Drop the alpha from the canvas.
         canvas = canvas[0:3, :, :].clone()
+
+        # Perform postprocessing.
+        for post_processor in self._post_processors:
+            canvas = post_processor.apply(rng, canvas)
+
         return canvas, mask
 
 
@@ -729,6 +783,7 @@ class DataPipeline:
         self.load_inputs()
         self.input_augment()
         self.load_applicators()
+        self.load_postprocess()
         self.create_generators()
 
     def _substitute_path(self, path: Path) -> Path:
@@ -782,6 +837,21 @@ class DataPipeline:
         for name, applicator_config in self._data_config.applicators.items():
             self._applicators[name] = Applicator(applicator_config, device=self._device)
 
+    def load_postprocess(self):
+        self._postprocess = {}
+        for name, postprocess_config in self._data_config.post_process.items():
+            match postprocess_config.function:
+                case "blur":
+                    self._postprocess[name] = PostprocessBlur(
+                        postprocess_config.config,
+                        ratio=postprocess_config.ratio,
+                    )
+                case "jpg":
+                    self._postprocess[name] = PostprocessJpg(
+                        postprocess_config.config,
+                        ratio=postprocess_config.ratio,
+                    )
+
     def create_generators(self):
         self._generators = []
         for config in self._data_config.generator:
@@ -790,7 +860,16 @@ class DataPipeline:
                 applicator = self._applicators[applicator_name]
                 images = self._inputs[collection_name]
                 typed_stack.append((applicator, images))
-            generator = DataGenerator(typed_stack, config=config, device=self._device)
+            # Collect postprocessors
+            post_processors = []
+            for post_process_name in config.post_process:
+                post_processors.append(self._postprocess[post_process_name])
+            generator = DataGenerator(
+                typed_stack,
+                config=config,
+                device=self._device,
+                post_processors=post_processors,
+            )
             self._generators.append(generator)
 
     def generate_with_generator(
