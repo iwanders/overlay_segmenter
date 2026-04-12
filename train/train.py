@@ -90,7 +90,10 @@ training_gen = train_generator
 batch_count = 20
 
 dynamic_training_gen = DynamicGenerator(
-    training_gen, batch_count=batch_count, batch_size=batch_size, device=device
+    training_gen.batch_generator(),
+    batch_count=batch_count,
+    batch_size=batch_size,
+    device=device,
 )
 
 

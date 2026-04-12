@@ -448,7 +448,7 @@ class DatasetGenerator:
         mask = fg_alpha >= 0.5
         # combined = torch.from_numpy(combined)
         mask = mask.to(torch.int64).squeeze()
-        combined = augment_jpg_roundtrip(combined, quality=10)
+        # combined = augment_jpg_roundtrip(combined, quality=10)
         return (combined, mask)
 
     def generate(self, count=1):
@@ -475,6 +475,12 @@ class DatasetGenerator:
 
         return results
 
+    def batch_generator(self) -> Any:
+        def batch_gen(batch_count):
+            return self.generate(batch_count)
+
+        return batch_gen
+
     def set_batch_size(self, batch_size):
         self._batch_size = batch_size
 
@@ -483,8 +489,8 @@ class DatasetGenerator:
 
 
 class DynamicGenerator:
-    def __init__(self, generator, batch_count=20, batch_size=4, device="cpu"):
-        self._generator = generator
+    def __init__(self, batch_generator, batch_count=20, batch_size=4, device="cpu"):
+        self._batch_generator = batch_generator
         self._batch_count = batch_count
         self._batch_size = batch_size
         self._device = device
@@ -492,7 +498,7 @@ class DynamicGenerator:
     def __iter__(self):
         def gen():
             for i in range(self._batch_count):
-                g = self._generator.generate(self._batch_size)
+                g = self._batch_generator(self._batch_size)
                 d = torch.cat([z[0].unsqueeze(0) for z in g], dim=0)
                 m = torch.cat([z[1].unsqueeze(0) for z in g], dim=0)
                 d = d.to(self._device)
@@ -602,8 +608,12 @@ class PostprocessBlur(PostProcess):
 
         blur_size = rng.uniform(self._min, self._max)
 
+        kernel_size = int(blur_size * 2)
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+
         res = torchvision.transforms.functional.gaussian_blur(
-            tensor, int(blur_size * 2), sigma=blur_size
+            tensor, kernel_size, sigma=blur_size
         )
         return res.to(tensor.device)
 
@@ -770,7 +780,14 @@ class DataGenerator:
         for post_processor in self._post_processors:
             canvas = post_processor.apply(rng, canvas)
 
+        # Perform the masking.
+        mask = (mask[3, :, :] >= self._config.mask_alpha).unsqueeze(0)
+        mask = mask.to(torch.int64)
+
         return canvas, mask
+
+    def first_input_count(self) -> int:
+        return len(self._stack[0][1])
 
 
 class DataPipeline:
@@ -785,6 +802,7 @@ class DataPipeline:
         self.load_applicators()
         self.load_postprocess()
         self.create_generators()
+        self.calculate_generator_weights()
 
     def _substitute_path(self, path: Path) -> Path:
         path_as_str = str(path)
@@ -853,7 +871,7 @@ class DataPipeline:
                     )
 
     def create_generators(self):
-        self._generators = []
+        self._generators: list[DataGenerator] = []
         for config in self._data_config.generator:
             typed_stack = []
             for applicator_name, collection_name in config.inputs:
@@ -872,10 +890,29 @@ class DataPipeline:
             )
             self._generators.append(generator)
 
+    def calculate_generator_weights(self):
+        # Calculate this based on the first layer input count.
+        w = []
+        for generator in self._generators:
+            count = generator.first_input_count()
+            w.append(count)
+        w = np.array(w)
+        self._generator_weights = w / np.sum(w, dtype=np.float64)
+
     def generate_with_generator(
         self, index: int, rng: np.random.Generator
     ) -> (Tensor, Tensor):
         return self._generators[index].generate(rng)
+
+    def generate(self, rng: np.random.Generator) -> (Tensor, Tensor):
+        choice = rng.choice(range(len(self._generators)), p=self._generator_weights)
+        return self._generators[choice].generate(rng)
+
+    def batch_generator_fun(self, rng: np.random.Generator) -> Any:
+        def batch_generator(batch_size):
+            return [self.generate(rng) for _ in range(batch_size)]
+
+        return batch_generator
 
 
 def test_new_spec():
@@ -889,8 +926,13 @@ def test_new_spec():
 
     z.print_inputs()
     for i in range(10):
-        a = z.generate_with_generator(0, rng)
+        a = z.generate(rng)
         generated.append(a)
+
+    batch_generator = DynamicGenerator(batch_generator=z.batch_generator_fun(rng))
+    rollout_gen = iter(batch_generator)
+    generated = [z for z in rollout_gen]
+
     output = Path("/tmp/")
     for i, (sample_img, sample_mask) in enumerate(generated):
         torchvision.utils.save_image(sample_img, output / f"sample_{i}_img.png")
