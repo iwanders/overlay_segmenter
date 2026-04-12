@@ -16,6 +16,20 @@ from torch import Tensor
 from torchvision.io import decode_jpeg, encode_jpeg
 from torchvision.transforms import ToTensor
 
+if torch.cuda.is_available():
+    print(f"GPU: {torch.cuda.get_device_name(0)} is available.")
+    preferred_device = torch.device("cuda:0")  # or "cuda" for the current device
+else:
+    print("No GPU available. Training will run on CPU.")
+    preferred_device = torch.device("cpu")
+
+
+def lookup_device(input_str) -> torch.device:
+    if input_str == "auto":
+        return preferred_device
+
+    return input_str
+
 
 class TensorNameTracker:
     def __init__(self):
@@ -149,7 +163,6 @@ def load_image_file(d, device):
 class ImageLoader:
     def __init__(
         self,
-        image_dir: Path,
         crop_top_left: None | tuple[int, int] = None,
         crop_size: None | tuple[int, int] = None,
         device="cpu",
@@ -159,9 +172,7 @@ class ImageLoader:
         self._crop_size = crop_size
         self._images = []
         self._device = device
-        self._image_dir: Path = image_dir
         self._remove_alpha = remove_alpha
-        self.load_images()
 
     @staticmethod
     def background_loader(image_dir, **kwargs):
@@ -171,12 +182,14 @@ class ImageLoader:
             kwargs["crop_size"] = (1700, 825)
         if "remove_alpha" not in kwargs:
             kwargs["remove_alpha"] = True
-        v = ImageLoader(image_dir=image_dir, **kwargs)
+        v = ImageLoader(**kwargs)
+        v.load_images(image_dir)
         return v
 
     @staticmethod
     def foreground_loader(image_dir, **kwargs):
-        v = ImageLoader(image_dir=image_dir, **kwargs)
+        v = ImageLoader(**kwargs)
+        v.load_images(image_dir)
         return v
 
     def load_image(self, d):
@@ -201,8 +214,8 @@ class ImageLoader:
                 image = image[0:3, :, :]
         return image
 
-    def load_images(self):
-        to_load = list(self._image_dir.rglob("*.png"))
+    def load_images(self, image_dir: Path):
+        to_load = list(image_dir.rglob("*.png"))
 
         def load_img(f):
             img = self.load_image(f)
@@ -420,7 +433,7 @@ class DatasetGenerator:
         mask = fg_alpha >= 0.5
         # combined = torch.from_numpy(combined)
         mask = mask.to(torch.int64).squeeze()
-        # combined = augment_jpg_roundtrip(combined, quality=20)
+        combined = augment_jpg_roundtrip(combined, quality=10)
         return (combined, mask)
 
     def generate(self, count=1):
@@ -518,12 +531,14 @@ class DistributionNormalInt(BaseModel):
 
 # A named group of data input.
 class DataInput(BaseModel):
-    base_dir: str | None = None
-    dirs: list[str]
+    base_dir: Path | None = None
+    dirs: list[Path]
     augmentations: list[str] = []
+    remove_alpha: bool = False
     pattern: str = "*.png"
-    top_left: tuple[int, int] = (0, 0)
-    bottom_right: tuple[int, int] = (-1, -1)
+    top_left: tuple[int, int] | None = None
+    size: tuple[int, int] | None = None
+    device: str = "auto"
 
 
 class DataApplicator(BaseModel):
@@ -561,7 +576,7 @@ class DataStack(BaseModel):
 
 
 class DataConfig(BaseModel):
-    base_dir: str = ""
+    base_dir: Path = Path()
     applicators: dict[str, DataApplicator]
     inputs: dict[str, DataInput]
     data: list[DataStack]
@@ -571,7 +586,35 @@ class DataPipeline:
     def __init__(self, config_file):
         with open(config_file) as f:
             d = yaml.safe_load(f)
-        z = DataConfig.model_validate(d["config"])
+        self._data_config = DataConfig.model_validate(d["config"])
+        print(self._data_config)
+        self.load_inputs()
+
+    def load_inputs(self):
+        self._inputs = {}
+        for name, input_group in self._data_config.inputs.items():
+            print(name, input_group)
+            this_set = []
+
+            for subdir in input_group.dirs:
+                base_dir = (
+                    input_group.base_dir
+                    if input_group.base_dir is not None
+                    else self._data_config.base_dir
+                )
+                full_dir = base_dir / subdir
+                print(full_dir)
+                loader = ImageLoader(
+                    full_dir,
+                    crop_top_left=input_group.top_left,
+                    crop_size=input_group.size,
+                    remove_alpha=input_group.remove_alpha,
+                    device=lookup_device(input_group.device),
+                )
+                loader.load_images()
+                this_set.extend(loader.images())
+            self._inputs[name] = this_set
+            print(self._inputs)
 
 
 def test_new_spec():
