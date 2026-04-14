@@ -51,7 +51,7 @@ validation_pipeline = train_pipeline.split_validation(rng=rng, ratio=0.1)
 train_pipeline.post_image_init()
 
 
-validation_set = [train_pipeline.generate(rng) for _ in range(50)]
+validation_set = [train_pipeline.generate(rng) for _ in range(100)]
 validation_set = [(a.to(device), b.to(device)) for a, b in validation_set]
 
 
@@ -73,7 +73,7 @@ validation_loader = torch.utils.data.DataLoader(
 )
 
 
-batch_count = 20
+batch_count = 40
 
 dynamic_training_gen = DynamicGenerator(
     batch_generator=train_pipeline.batch_generator_fun(rng),
@@ -99,10 +99,14 @@ model.to(device)
 # optimizer = torch.optim.SGD(model.parameters(), lr=0.0001, momentum=0.9)
 # optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
 # learning_rate = 0.001  # for batch size of 4. Works well, plateau at 300, but saw one spike.
-learning_rate = 0.0005  # for batch size of 4.
+# learning_rate = 0.001  # for batch size of 4.
 learning_rate = 0.00025  # Lowering it because data is more complex now.
 # learning_rate = 0.005
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+
+scheduler = torch.optim.lr_scheduler.MultiStepLR(
+    optimizer, milestones=[25, 50, 300, 600, 1200], gamma=0.2
+)
 
 
 loss_fn = torch.nn.CrossEntropyLoss()
@@ -161,7 +165,7 @@ def train_one_epoch(epoch_index):
             # tb_writer.add_scalar("Loss/train", last_loss, tb_x)
             running_loss = 0.0
         """
-
+    scheduler.step()
     return epoch_loss / count
 
 
