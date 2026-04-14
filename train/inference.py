@@ -252,7 +252,11 @@ def tiled_inference(
 
     for w in range(tiles.shape[1]):
         with torch.no_grad():
-            masked[:, w, :, :, :] = model(tiles[:, w, :, :, :])
+            if False:
+                for b in range(tiles.shape[0]):
+                    masked[b, w, :, :, :] = model(tiles[b, w, :, :, :].unsqueeze(0))
+            else:
+                masked[:, w, :, :, :] = model(tiles[:, w, :, :, :])
 
     just_tiled_section_size = (
         2,
@@ -277,12 +281,14 @@ def tiled_inference(
     return mask_image
 
 
-def write_network_output(mask_image: Tensor, directory: Path, name_prefix: str):
-    mask_img = directory / f"{name_prefix}_mask.png"
+def write_network_output(
+    mask_image: Tensor, directory: Path, name_prefix: str, name_suffix: str = ""
+):
+    mask_img = directory / f"{name_prefix}_mask{name_suffix}.png"
     index_mask = mask_image.argmax(0)
     torchvision.utils.save_image(index_mask.to(torch.float), mask_img)
     # print(f"index_mask: {index_mask.shape}", index_mask)
-    values_img = directory / f"{name_prefix}_values.png"
+    values_img = directory / f"{name_prefix}_values{name_suffix}.png"
     t = mask_image[1, :, :]
     span = t.max() - t.min()
     t = (t - t.min()) / span
@@ -310,8 +316,14 @@ def batched_inference(model: Unet, tiles: Tensor, batch_size=10) -> Tensor:
 
 def run_inference(args):
     model = load_model(args.checkpoint)
+    if args.float16:
+        model = model.to(torch.float16)
     out_dir = args.output
-    print(args)
+
+    suffix = args.suffix
+    if suffix:
+        suffix = "_" + suffix
+
     for f in args.input:
         if "_mask.png" in str(f) or "_values.png" in str(f) or "_batch.png" in str(f):
             print(f"Ignoring {f} because it looks like our output")
@@ -321,6 +333,8 @@ def run_inference(args):
         if image.shape[0] == 4:
             image = image[0:3, :, :]
 
+        if args.float16:
+            image = image.to(torch.float16)
         time_start = time.time()
         if True:
             # This one takes 0.003677845001220703 for subsequent calls.
@@ -338,7 +352,9 @@ def run_inference(args):
         batch_path = out_dir / f"{name_prefix}_batch.png"
         # cutter.debug_dump_batch(tiles, batch_path)
         print(f"Done {name_prefix} in {time_end - time_start} seconds")
-        write_network_output(masked, directory=out_dir, name_prefix=name_prefix)
+        write_network_output(
+            masked, directory=out_dir, name_prefix=name_prefix, name_suffix=suffix
+        )
 
 
 if __name__ == "__main__":
@@ -351,6 +367,8 @@ if __name__ == "__main__":
     parser_inference = subparsers.add_parser("inference", help="Run inference")
     parser_inference.add_argument("-c", "--checkpoint", type=Path, required=True)
     parser_inference.add_argument("--output", type=Path, default=Path("/tmp/"))
+    parser_inference.add_argument("--float16", default=False, action="store_true")
+    parser_inference.add_argument("--suffix", type=str, default="")
     parser_inference.add_argument("input", type=Path, nargs="+")
     parser_inference.set_defaults(func=run_inference)
 

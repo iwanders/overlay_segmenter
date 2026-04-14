@@ -20,6 +20,7 @@ if __name__ == "__main__":
     plt.ylabel("loss")
     plt.ylim([0.0, 0.4])
     plt.title("Training Loss")
+    plt.gcf().set_size_inches(8 * 2, 4 * 2)
 
     epoch_interval = np.array(epoch)
     time_interval = np.array([x["elapsed_time"] for x in d])

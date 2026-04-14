@@ -105,7 +105,9 @@ learning_rate = 0.00025  # Lowering it because data is more complex now.
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
 scheduler = torch.optim.lr_scheduler.MultiStepLR(
-    optimizer, milestones=[25, 50, 300, 600, 1200], gamma=0.2
+    optimizer,
+    milestones=[25, 50, 300],
+    gamma=0.2,  # , 600, 1200
 )
 
 
