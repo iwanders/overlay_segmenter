@@ -604,6 +604,30 @@ class PostProcess:
     def apply(self, rng: np.random.Generator, tensor: Tensor) -> Tensor:
         pass
 
+    def set_ratio(self, ratio: float):
+        self._ratio = ratio
+
+    @staticmethod
+    def instantiate(postprocess_config: DataPostprocess) -> "PostProcess":
+        match postprocess_config.function:
+            case "blur":
+                return PostprocessBlur(
+                    postprocess_config.config,
+                    ratio=postprocess_config.ratio,
+                )
+            case "jpg":
+                return PostprocessJpg(
+                    postprocess_config.config,
+                    ratio=postprocess_config.ratio,
+                )
+            case "combined":
+                return PostprocessCombined(
+                    postprocess_config.config,
+                    ratio=postprocess_config.ratio,
+                )
+            case _ as missing:
+                raise NotImplementedError(f"Not implemented postprocess: {missing}")
+
 
 class PostprocessBlur(PostProcess):
     def __init__(self, config, ratio):
@@ -638,6 +662,29 @@ class PostprocessJpg(PostProcess):
             return tensor
         quality = rng.integers(self._min, self._max)
         res = augment_jpg_roundtrip(tensor, quality)
+        return res.to(tensor.device)
+
+
+class PostprocessCombined(PostProcess):
+    def __init__(self, config, ratio):
+        super().__init__(ratio)
+        self._operators = []
+        self._child_ratio = config.get("child_ratio", 1.0)
+        print(config)
+        for conf in config["functions"]:
+            parsed = DataPostprocess.model_validate(conf)
+            operator = PostProcess.instantiate(parsed)
+            operator.set_ratio(self._child_ratio)
+            self._operators.append(operator)
+
+    def apply(self, rng: np.random.Generator, tensor: Tensor) -> Tensor:
+        print("Apply")
+        if not self.should_apply(rng):
+            return tensor
+        res = tensor
+        for f in self._operators:
+            res = f.apply(rng, res)
+
         return res.to(tensor.device)
 
 
@@ -906,17 +953,7 @@ class DataPipeline:
     def load_postprocess(self):
         self._postprocess = {}
         for name, postprocess_config in self._data_config.post_process.items():
-            match postprocess_config.function:
-                case "blur":
-                    self._postprocess[name] = PostprocessBlur(
-                        postprocess_config.config,
-                        ratio=postprocess_config.ratio,
-                    )
-                case "jpg":
-                    self._postprocess[name] = PostprocessJpg(
-                        postprocess_config.config,
-                        ratio=postprocess_config.ratio,
-                    )
+            self._postprocess[name] = PostProcess.instantiate(postprocess_config)
 
     def create_generators(self):
         self._generators: list[DataGenerator] = []

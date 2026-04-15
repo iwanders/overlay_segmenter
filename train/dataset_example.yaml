@@ -5,6 +5,7 @@ _data_meta: &data_meta
 _post_process: &post_process
     - fine_blur
     - jpeg
+    - fine_blur_jpg
 
 _bg_input: &bg_input
     remove_alpha: true
@@ -22,18 +23,26 @@ _fg_input: &fg_input
 config:
     base_dir: "../../datasets/"
     post_process:
-        fine_blur:
+        fine_blur: &blur_cfg
             function: blur
             config:
                 min: 0.0
-                max: 5.0
-            ratio: 0.3
-        jpeg:
+                max: 3.0
+            ratio: 0.0
+        jpeg: &jpeg_cfg
             function: jpg
             config:
-                min: 30
+                min: 50
                 max: 100
-            ratio: 0.3
+            ratio: 0.0
+        fine_blur_jpg:
+            function: combined
+            config:
+                child_ratio: 1.0
+                functions:
+                    - <<: *blur_cfg
+                    - <<: *jpeg_cfg
+            ratio: 0.5
 
     applicators:
         bg_applicator:
