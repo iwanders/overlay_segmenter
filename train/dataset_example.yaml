@@ -12,7 +12,9 @@ _bg_input: &bg_input
     base_dir: "{base_dir}/background/"
     top_left: [105, 27]
     size: [1700, 825]
-    augmentations: [flip_horizontal]
+    # This is an option, but it takes more (v)ram...
+    # It can also be done in post_process_image in the applicator.
+    # augmentations: [flip_horizontal]
     device: cpu
     validation_split: true
 
@@ -43,6 +45,9 @@ config:
                     - <<: *blur_cfg
                     - <<: *jpeg_cfg
             ratio: 0.5
+        augment_flip_horizontal:
+            function: flip_horizontal
+            ratio: 0.5
 
     applicators:
         bg_applicator:
@@ -50,6 +55,8 @@ config:
             position_x: { mean: 0.5, sigma: 0.15, by_self: true }
             position_y: { mean: 0.5, sigma: 0.15, by_self: true }
             crop: [256, 256]
+            post_process_image:
+                - augment_flip_horizontal
         fg_applicator:
             ratio: 1.0
             position_x: { mean: 0.5, sigma: 0.4, by_self: true }

@@ -583,12 +583,14 @@ class DataApplicator(BaseModel):
     # Crop the applied image to this size, if the first image, this determines the canvas size.
     crop: Union[None, tuple[int, int]] = None
 
+    post_process_image: list[str] = []
+
 
 class DataPostprocess(BaseModel):
     # Name of the postprocessing function.
     function: str
     # Configuration for the postprocessing function
-    config: Any
+    config: dict[str, Any] = {}
     # Ratio to which this postprocessing function is applied.
     ratio: float = 1.0
 
@@ -622,6 +624,11 @@ class PostProcess:
                 )
             case "combined":
                 return PostprocessCombined(
+                    postprocess_config.config,
+                    ratio=postprocess_config.ratio,
+                )
+            case "flip_horizontal":
+                return PostprocessFlipHorizontal(
                     postprocess_config.config,
                     ratio=postprocess_config.ratio,
                 )
@@ -665,12 +672,21 @@ class PostprocessJpg(PostProcess):
         return res.to(tensor.device)
 
 
+class PostprocessFlipHorizontal(PostProcess):
+    def __init__(self, config, ratio):
+        super().__init__(ratio)
+
+    def apply(self, rng: np.random.Generator, tensor: Tensor) -> Tensor:
+        if not self.should_apply(rng):
+            return tensor
+        return torch.flip(tensor, [2])
+
+
 class PostprocessCombined(PostProcess):
     def __init__(self, config, ratio):
         super().__init__(ratio)
         self._operators = []
         self._child_ratio = config.get("child_ratio", 1.0)
-        print(config)
         for conf in config["functions"]:
             parsed = DataPostprocess.model_validate(conf)
             operator = PostProcess.instantiate(parsed)
@@ -678,7 +694,6 @@ class PostprocessCombined(PostProcess):
             self._operators.append(operator)
 
     def apply(self, rng: np.random.Generator, tensor: Tensor) -> Tensor:
-        print("Apply")
         if not self.should_apply(rng):
             return tensor
         res = tensor
@@ -709,9 +724,17 @@ class DataConfig(BaseModel):
 
 
 class Applicator:
-    def __init__(self, config: DataApplicator, device: torch.device):
+    def __init__(
+        self,
+        config: DataApplicator,
+        device: torch.device,
+        post_processors: dict[str, PostProcess],
+    ):
         self._config = config
         self._device = device
+        self._post_process_image = [
+            post_processors[k] for k in config.post_process_image
+        ]
 
     def __str__(self):
         return f"<Applicator {self._config} at 0x{id(self):x}>"
@@ -800,6 +823,10 @@ class Applicator:
             fg_rgb = sub_canvas[:3]
             fg_alpha = sub_canvas[3:] * blend_alpha  # (1, H, W)
             canvas = alpha_blend(fg_rgb, canvas[:3, :, :], fg_alpha)
+
+        for processor in self._post_process_image:
+            canvas = processor.apply(rng, canvas)
+
         return canvas, mask
 
 
@@ -872,8 +899,8 @@ class DataPipeline:
 
     def post_image_init(self):
         self.input_augment()
-        self.load_applicators()
         self.load_postprocess()
+        self.load_applicators()
         self.create_generators()
         self.calculate_generator_weights()
 
@@ -941,6 +968,7 @@ class DataPipeline:
             new_images = []
             for augmentation in input_group.augmentations:
                 if augmentation == "flip_horizontal":
+                    print("things")
                     for img in these_images:
                         new_images.append(torch.flip(img, [2]))
             self._inputs[name].extend(new_images)
@@ -948,7 +976,11 @@ class DataPipeline:
     def load_applicators(self):
         self._applicators = {}
         for name, applicator_config in self._data_config.applicators.items():
-            self._applicators[name] = Applicator(applicator_config, device=self._device)
+            self._applicators[name] = Applicator(
+                applicator_config,
+                device=self._device,
+                post_processors=self._postprocess,
+            )
 
     def load_postprocess(self):
         self._postprocess = {}
