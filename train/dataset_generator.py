@@ -10,12 +10,17 @@ from typing import Any, Union
 import numpy as np
 import torch
 import torchvision
+import torchvision.transforms.functional as F
 import yaml
 from PIL import Image
 from pydantic import BaseModel, ConfigDict
 from torch import Tensor
 from torchvision.io import decode_jpeg, encode_jpeg
 from torchvision.transforms import ToTensor
+
+"""
+Todo; should put the images as u8 on the gpu... only go from u8 to floats when we are doing training.
+"""
 
 if torch.cuda.is_available():
     print(f"GPU: {torch.cuda.get_device_name(0)} is available.")
@@ -968,7 +973,6 @@ class DataPipeline:
             new_images = []
             for augmentation in input_group.augmentations:
                 if augmentation == "flip_horizontal":
-                    print("things")
                     for img in these_images:
                         new_images.append(torch.flip(img, [2]))
             self._inputs[name].extend(new_images)

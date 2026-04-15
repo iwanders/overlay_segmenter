@@ -12,12 +12,8 @@ import torch
 import torchvision
 
 from dataset_generator import (
-    DataLoader,
-    DatasetGenerator,
+    DataPipeline,
     DynamicGenerator,
-    ImageLoader,
-    load_paths,
-    rng_shuffle,
 )
 from model import Unet
 
@@ -41,7 +37,6 @@ alpha_factor = 0.5
 # training_set = []
 validation_set = []
 
-from dataset_generator import DataPipeline
 
 config_file = "dataset.priv.yaml"
 train_pipeline = DataPipeline(config_file=config_file, full_init=False)
@@ -106,7 +101,7 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
 scheduler = torch.optim.lr_scheduler.MultiStepLR(
     optimizer,
-    milestones=[25, 50, 300, 800],
+    milestones=[40, 80, 600, 1000],
     gamma=0.2,
 )
 
