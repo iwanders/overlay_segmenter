@@ -325,7 +325,11 @@ def run_inference(args):
         suffix = "_" + suffix
 
     for f in args.input:
-        if "_mask.png" in str(f) or "_values.png" in str(f) or "_batch.png" in str(f):
+        if (
+            f"_mask{suffix}.png" in str(f)
+            or f"_values{suffix}.png" in str(f)
+            or "_batch.png" in str(f)
+        ):
             print(f"Ignoring {f} because it looks like our output")
             continue
         s = time.time()
