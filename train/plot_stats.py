@@ -12,9 +12,19 @@ if __name__ == "__main__":
     epoch = [x["epoch"] for x in d]
     train_loss = [x["train_loss"] for x in d]
     validation_loss = [x["validation_loss"] for x in d]
-
-    plt.plot(epoch, train_loss, label="Train", color="blue", linestyle="--")
-    plt.plot(epoch, validation_loss, label="Validation", color="red", marker="")
+    lowest_validation = np.min(validation_loss)
+    lowest_train = np.min(train_loss)
+    # marker =  "" linestyle="-",
+    plt.plot(epoch, train_loss, label="Train", color="blue", linewidth=0.5)
+    plt.axhline(y=lowest_train, color="blue", linestyle="--", linewidth=0.5)
+    plt.plot(
+        epoch,
+        validation_loss,
+        label="Validation",
+        color="red",
+        linewidth=0.5,
+    )
+    plt.axhline(y=lowest_validation, color="red", linestyle="--", linewidth=0.5)
 
     plt.xlabel("Epochs")
     plt.ylabel("loss")
