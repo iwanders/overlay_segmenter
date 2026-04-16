@@ -17,6 +17,14 @@ if __name__ == "__main__":
     # marker =  "" linestyle="-",
     plt.plot(epoch, train_loss, label="Train", color="blue", linewidth=0.5)
     plt.axhline(y=lowest_train, color="blue", linestyle="--", linewidth=0.5)
+    plt.text(
+        0,
+        lowest_train,
+        f"{lowest_train}",
+        color="blue",
+        va="top",
+        # fontweight="bold",
+    )
     plt.plot(
         epoch,
         validation_loss,
@@ -25,6 +33,14 @@ if __name__ == "__main__":
         linewidth=0.5,
     )
     plt.axhline(y=lowest_validation, color="red", linestyle="--", linewidth=0.5)
+    plt.text(
+        0,
+        lowest_validation,
+        f"{lowest_validation}",
+        color="red",
+        va="bottom",
+        # fontweight="bold",
+    )
 
     plt.xlabel("Epochs")
     plt.ylabel("loss")
