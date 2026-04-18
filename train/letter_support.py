@@ -102,19 +102,19 @@ class GlyphSort:
         back_t = bg
         front_t = self._img
         # 3. Separate RGB and Alpha
-        back_rgb = back_t[:3, :, :]
-        back_a = back_t[3:, :, :]
-        front_rgb = front_t[:3, :, :]
-        front_a = front_t[3:, :, :]
+        back_rgb = back_t[:3, :, :].to(torch.int32)
+        back_a = back_t[3:, :, :].to(torch.int32)
+        front_rgb = front_t[:3, :, :].to(torch.int32)
+        front_a = front_t[3:, :, :].to(torch.int32)
         # print("back_a:", back_a.shape)
         # print("front_a:", front_a.shape)
 
         # 4. Alpha Blending Formula
         # Out = Front * AlphaF + Back * (1 - AlphaF)
         # Note: Assumes top layer's alpha dictates composition
-        out_a = front_a + back_a * (1.0 - front_a)
-        out_rgb = (front_rgb * front_a + back_rgb * back_a * (1.0 - front_a)) / (
-            out_a + 1e-6
+        out_a = front_a + back_a * (255 - front_a)
+        out_rgb = (front_rgb * front_a * 255 + back_rgb * back_a * (255 - front_a)) // (
+            out_a * 255 + 1
         )
 
         # Combine RGB and Alpha
@@ -144,7 +144,7 @@ class Glyphset:
                 baseline=1,
                 is_space=True,
             ),
-            torch.zeros((4, 1, self._spec.space_width)),
+            torch.zeros((4, 1, self._spec.space_width), dtype=torch.uint8),
         )
 
     @staticmethod
@@ -180,7 +180,7 @@ class Glyphset:
         return None
 
     def create_glyphs(self):
-        d = load_image_file(
+        d = load_image_file_u8(
             self._glyphset_yaml_path.parent / self._spec.image_path, device="cpu"
         )
         # First, get the region between the ascender and the descender.
@@ -235,6 +235,7 @@ class Glyphset:
         xpos = x
         previous_token: GlyphSort | None = None
         for i, t in enumerate(tokens):
+            print(f"Rendering {t} at {xpos}")
             if (
                 t != " "
                 and previous_token is not None
@@ -256,10 +257,13 @@ class Glyphset:
 def run_glyphset_dump(args):
     glyphset = Glyphset(args.input)
 
-    torchvision.utils.save_image(glyphset._line, "/tmp/line.png")
+    torchvision.utils.save_image(
+        glyphset._line.to(torch.float) / 255.0, "/tmp/line.png"
+    )
     for i, glyph in enumerate(glyphset.glyphs()):
+        glyphimg = glyph.image().to(torch.float) / 255.0
         torchvision.utils.save_image(
-            glyph.image(), f"/tmp/glyph_{i:0>3}_{glyph.filename_tokens()}.png"
+            glyphimg, f"/tmp/glyph_{i:0>3}_{glyph.filename_tokens()}.png"
         )
 
 
@@ -270,8 +274,10 @@ def run_typeset(args):
     if width is None:
         width = glyphset.typeset_width(tokens)
 
-    canvas = torch.zeros((4, args.height, width))
+    canvas = torch.zeros((4, args.height, width), dtype=torch.uint8)
     glyphset.typeset(canvas, tokens, x=0, y=int(args.height / 2))
+    print(canvas.dtype)
+    canvas = canvas.to(torch.float) / 255.0
     torchvision.utils.save_image(canvas, args.output)
 
 
