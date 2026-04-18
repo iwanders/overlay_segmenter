@@ -85,9 +85,9 @@ class GlyphSort:
         return self._spec.tokens.replace("/", "_slash_").replace('"', "_quote_")
 
     def typeset(self, canvas: Tensor, x: int, y: int):
-        print(f"Typesetting {self._spec.tokens} at x={x}, y={y}")
+        # print(f"Typesetting {self._spec.tokens} at x={x}, y={y}")
         c, h, w = self._img.shape
-        print("c:", c, "h", h, "w", w)
+        # print("c:", c, "h", h, "w", w)
         b = self._spec.baseline
         canvas_t = y - b
         canvas_b = canvas_t + h
@@ -103,8 +103,8 @@ class GlyphSort:
         back_a = back_t[3:, :, :]
         front_rgb = front_t[:3, :, :]
         front_a = front_t[3:, :, :]
-        print("back_a:", back_a.shape)
-        print("front_a:", front_a.shape)
+        # print("back_a:", back_a.shape)
+        # print("front_a:", front_a.shape)
 
         # 4. Alpha Blending Formula
         # Out = Front * AlphaF + Back * (1 - AlphaF)
@@ -238,7 +238,7 @@ class Glyphset:
             previous_token = glyph_set
 
 
-def run_glyphset(args):
+def run_glyphset_dump(args):
     glyphset = Glyphset(args.input)
 
     torchvision.utils.save_image(glyphset._line, "/tmp/line.png")
@@ -246,21 +246,44 @@ def run_glyphset(args):
         torchvision.utils.save_image(
             glyph.image(), f"/tmp/glyph_{i:0>3}_{glyph.filename_tokens()}.png"
         )
-    canvas = torch.zeros((4, 28, 120))
-    glyphset.typeset(canvas, ("pc ba p/c"[:]), x=3, y=17)
-    torchvision.utils.save_image(canvas, "/tmp/typeset_pc_ba.png")
+
+
+def run_typeset(args):
+    glyphset = Glyphset(args.input)
+
+    canvas = torch.zeros((4, args.height, args.width))
+    glyphset.typeset(canvas, (args.text[:]), x=0, y=int(args.height / 2))
+    torchvision.utils.save_image(canvas, args.output)
 
 
 if __name__ == "__main__":
+    # ./letter_support.py glyphset ./example_glyphset/test_font.yaml
     parser = argparse.ArgumentParser(prog="letter_support")
     subparsers = parser.add_subparsers(dest="command", help="sub-command help")
 
     parser_glyphset = subparsers.add_parser(
-        "glyphset",
+        "glyphset_dump",
         help="Obtain a glyph set, coordinates are pixel position when the pixel is selected in GIMP",
     )
     parser_glyphset.add_argument("input", type=Path)
-    parser_glyphset.set_defaults(func=run_glyphset)
+    parser_glyphset.set_defaults(func=run_glyphset_dump)
+
+    parser_typeset = subparsers.add_parser(
+        "typeset",
+        help="Typeset to a canvas",
+    )
+    parser_typeset.add_argument("input", type=Path)
+    parser_typeset.add_argument("text", type=str)
+    parser_typeset.add_argument("--width", type=int, help="Canvas width", default=1024)
+    parser_typeset.add_argument("--height", type=int, help="Canvas height", default=50)
+    parser_typeset.add_argument(
+        "-o",
+        dest="output",
+        type=Path,
+        help="Output path",
+        default=Path("/tmp/typeset.png"),
+    )
+    parser_typeset.set_defaults(func=run_typeset)
 
     # parser_test = subparsers.add_parser("test", help="Run inference")
     # parser_test.set_defaults(func=run_test)
