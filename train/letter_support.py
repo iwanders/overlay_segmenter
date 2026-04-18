@@ -31,6 +31,14 @@ class GlyphSpec(BaseModel):
     # String representation of this section.
     tokens: str
 
+    # Extra spacing on the left of the character, may be negative.
+    left_spacing: int = 0
+    # Extra spacing on the right of the character, may be negative.
+    right_spacing: int = 0
+
+    # Marks the character as a space (tab, " ", etc...)
+    is_space: bool = False
+
 
 class FontSpec(BaseModel):
     # Image that holds the individual glyphs.
@@ -79,15 +87,43 @@ class GlyphSort:
     def typeset(self, canvas: Tensor, x: int, y: int):
         print(f"Typesetting {self._spec.tokens} at x={x}, y={y}")
         c, h, w = self._img.shape
+        print("c:", c, "h", h, "w", w)
         b = self._spec.baseline
         canvas_t = y - b
         canvas_b = canvas_t + h
-        canvas_l = x
-        canvas_r = x + w
-        canvas[0:c, canvas_t:canvas_b, canvas_l:canvas_r] = self._img
+        canvas_l = x + self._spec.left_spacing
+        canvas_r = canvas_l + w
+        # Grab the section from the canvas onto which we are going to blend our own glyph.
+        bg = canvas[0:c, canvas_t:canvas_b, canvas_l:canvas_r].clone()
+
+        back_t = bg
+        front_t = self._img
+        # 3. Separate RGB and Alpha
+        back_rgb = back_t[:3, :, :]
+        back_a = back_t[3:, :, :]
+        front_rgb = front_t[:3, :, :]
+        front_a = front_t[3:, :, :]
+        print("back_a:", back_a.shape)
+        print("front_a:", front_a.shape)
+
+        # 4. Alpha Blending Formula
+        # Out = Front * AlphaF + Back * (1 - AlphaF)
+        # Note: Assumes top layer's alpha dictates composition
+        out_a = front_a + back_a * (1.0 - front_a)
+        out_rgb = (front_rgb * front_a + back_rgb * back_a * (1.0 - front_a)) / (
+            out_a + 1e-6
+        )
+
+        # Combine RGB and Alpha
+        result_t = torch.cat([out_rgb, out_a], dim=0)
+
+        canvas[:, canvas_t:canvas_b, canvas_l:canvas_r] = result_t
 
     def width(self) -> int:
-        return self._img.shape[2]
+        return self._img.shape[2] + self._spec.right_spacing
+
+    def is_space(self) -> bool:
+        return self._spec.is_space
 
 
 class Glyphset:
@@ -101,7 +137,8 @@ class Glyphset:
         self._glyph_sorts[" "] = GlyphSort(
             GlyphSpec(
                 tokens=" ",
-                baseline=0,
+                baseline=1,
+                is_space=True,
             ),
             torch.zeros((4, 1, self._spec.space_width)),
         )
@@ -183,18 +220,22 @@ class Glyphset:
         """
 
         xpos = x
-        previous_token = " "
+        previous_token: GlyphSort | None = None
         for i, t in enumerate(tokens):
-            if t != " " and previous_token != " ":
+            if (
+                t != " "
+                and previous_token is not None
+                and not previous_token.is_space()
+            ):
                 xpos += self._spec.letter_spacing
 
             glyph_set = self._glyph_sorts.get(t)
-            if t is None:
+            if glyph_set is None:
                 raise KeyError(f"missing glyph {t}")
             glyph_set.typeset(canvas, x=xpos, y=y)
             xpos += glyph_set.width()
 
-            previous_token = t
+            previous_token = glyph_set
 
 
 def run_glyphset(args):
@@ -205,8 +246,8 @@ def run_glyphset(args):
         torchvision.utils.save_image(
             glyph.image(), f"/tmp/glyph_{i:0>3}_{glyph.filename_tokens()}.png"
         )
-    canvas = torch.zeros((4, 28, 100))
-    glyphset.typeset(canvas, ("pc ba"[:]), x=3, y=17)
+    canvas = torch.zeros((4, 28, 120))
+    glyphset.typeset(canvas, ("pc ba p/c"[:]), x=3, y=17)
     torchvision.utils.save_image(canvas, "/tmp/typeset_pc_ba.png")
 
 

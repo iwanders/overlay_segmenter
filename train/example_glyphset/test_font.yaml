@@ -14,6 +14,8 @@ glyphs:
       start: 85
       end: 91
     - tokens: "/"
+      left_spacing: -6
+      right_spacing: 2
     - tokens: "-"
 
 space_width: 10
