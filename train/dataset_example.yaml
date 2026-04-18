@@ -23,7 +23,7 @@ _fg_input: &fg_input
     base_dir: "{base_dir}/foreground/"
 
 config:
-    base_dir: "../../datasets/"
+    base_dir: "../../dataset_example/"
     post_process:
         fine_blur: &blur_cfg
             function: blur
@@ -73,21 +73,24 @@ config:
                 max: 3
     inputs:
         bg_LevelOne:
-            dirs: [Act1/LevelOne]
+            dirs: [LevelOne]
             <<: *bg_input
         fg_LevelOne:
-            dirs: [Act1/LevelOne]
+            dirs: [LevelOne]
             <<: *fg_input
         bg_LevelTwo:
-            dirs: [Act1/LevelTwo]
+            dirs: [LevelTwo]
             <<: *bg_input
         fg_LevelTwo:
-            dirs: [Act1/LevelTwo]
+            dirs: [LevelTwo]
             <<: *fg_input
         map_units:
-            dirs: [units]
+            dirs: ["."]
             remove_alpha: false
             base_dir: "{base_dir}/disturbance/"
+    glyphsets:
+        example_glyphset:
+            config: ./example_glyphset/test_font.yaml
     generator:
         - inputs:
               - [bg_applicator, "bg_{label}"]

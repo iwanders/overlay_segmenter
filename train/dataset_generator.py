@@ -10,27 +10,17 @@ from typing import Any, Union
 import numpy as np
 import torch
 import torchvision
-import torchvision.transforms.functional as F
 import yaml
-from PIL import Image
 from pydantic import BaseModel, ConfigDict
 from torch import Tensor
 from torchvision.io import decode_jpeg, encode_jpeg
-from torchvision.transforms import ToTensor
 
-if torch.cuda.is_available():
-    print(f"GPU: {torch.cuda.get_device_name(0)} is available.")
-    preferred_device = torch.device("cuda:0")  # or "cuda" for the current device
-else:
-    print("No GPU available. Training will run on CPU.")
-    preferred_device = torch.device("cpu")
-
-
-def lookup_device(input_str) -> torch.device:
-    if input_str == "auto":
-        return preferred_device
-
-    return input_str
+from letter_support import Glyphset
+from util import (
+    load_image_file,
+    load_image_file_u8,
+    lookup_device,
+)
 
 
 class TensorNameTracker:
@@ -183,21 +173,6 @@ def rng_shuffle(rng, container):
     shuffled_i = list(range(len(container)))
     rng.shuffle(shuffled_i)
     return [container[i] for i in shuffled_i]
-
-
-def load_image_file(d, device):
-    image = Image.open(d)
-    image = ToTensor()(image)
-    image = image.to(device)
-    # print("load image", type(image))
-    return image
-
-
-def load_image_file_u8(d, device):
-    image = Image.open(d)
-    image = F.pil_to_tensor(image)
-    image = image.to(device)
-    return image
 
 
 class ImageLoader:
@@ -770,13 +745,18 @@ class DataStack(BaseModel):
     post_process: list[str] = []
 
 
+class GlyphsetConfig(BaseModel):
+    config: Path
+
+
 class DataConfig(BaseModel):
     base_dir: Path = Path()
     process_device: str = "auto"
     applicators: dict[str, DataApplicator]
     inputs: dict[str, DataInput]
     generator: list[DataStack]
-    post_process: dict[str, DataPostprocess]
+    post_process: dict[str, DataPostprocess] = {}
+    glyphsets: dict[str, GlyphsetConfig] = {}
 
 
 class Applicator:
@@ -967,6 +947,7 @@ class DataPipeline:
         self.input_augment()
         self.load_postprocess()
         self.load_applicators()
+        self.load_glyphsets()
         self.create_generators()
         self.calculate_generator_weights()
 
@@ -1028,6 +1009,11 @@ class DataPipeline:
                     )
                 )
             self._inputs[name] = this_set
+
+    def load_glyphsets(self):
+        self._glyphsets = {}
+        for name, input_group in self._data_config.glyphsets.items():
+            self._glyphsets[name] = Glyphset(input_group.config)
 
     def input_augment(self):
         for name, input_group in self._data_config.inputs.items():
@@ -1115,7 +1101,8 @@ class DataPipeline:
 def test_new_spec():
     import sys
 
-    config_file = "dataset.priv.yaml"
+    # config_file = "dataset.priv.yaml"
+    config_file = "dataset_example.yaml"
     z = DataPipeline(config_file)
     print(z)
     rng = np.random.default_rng(3)

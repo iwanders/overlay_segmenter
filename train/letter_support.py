@@ -16,7 +16,7 @@ import yaml
 from pydantic import BaseModel
 from torch import Tensor
 
-from dataset_generator import load_image_file
+from util import load_image_file, load_image_file_u8
 
 
 class GlyphSpec(BaseModel):
@@ -131,7 +131,8 @@ class GlyphSort:
 
 class Glyphset:
     def __init__(self, glyphset_yaml: Path):
-        with open(args.input) as f:
+        self._glyphset_yaml_path = glyphset_yaml
+        with open(glyphset_yaml) as f:
             d = yaml.safe_load(f)
         spec = FontSpec.model_validate(d)
         self._spec = spec
@@ -179,7 +180,9 @@ class Glyphset:
         return None
 
     def create_glyphs(self):
-        d = load_image_file(args.input.parent / self._spec.image_path, device="cpu")
+        d = load_image_file(
+            self._glyphset_yaml_path.parent / self._spec.image_path, device="cpu"
+        )
         # First, get the region between the ascender and the descender.
         self._line = d[:, self._spec.ascender : self._spec.descender + 1, :]
         # Now that we have the line, next up is just striding through the line in horizontal direction and segmenting

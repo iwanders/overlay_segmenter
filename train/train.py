@@ -16,14 +16,11 @@ from dataset_generator import (
     DynamicGenerator,
 )
 from model import Unet
+from util import (
+    lookup_device,
+)
 
-if torch.cuda.is_available():
-    print(f"GPU: {torch.cuda.get_device_name(0)} is available.")
-    device = torch.device("cuda:0")  # or "cuda" for the current device
-else:
-    print("No GPU available. Training will run on CPU.")
-    device = torch.device("cpu")
-
+device = lookup_device("auto")
 print(f"Using device: {device}")
 
 torch.backends.cudnn.benchmark = False
