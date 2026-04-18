@@ -122,7 +122,7 @@ def clamp(value, min_val, max_val):
     return max(min_val, min(value, max_val))
 
 
-def alpha_blend(fg, bg, alpha):
+def alpha_blend(fg, bg, alpha, blend_alpha=None):
     """
     Blends foreground and background using an alpha mask.
     All tensors should be in [0, 1] range.
@@ -132,19 +132,50 @@ def alpha_blend(fg, bg, alpha):
     """
     # Formula: BG * (1 - alpha) + FG * alpha
     # Or simplified: bg + alpha * (fg - bg)
-    return bg + alpha * (fg - bg)
+    if fg.dtype == torch.float:
+        blend_alpha = 1.0 if blend_alpha is None else blend_alpha
+        return bg + alpha * blend_alpha * (fg - bg)
+    if fg.dtype == torch.uint8:
+        # Output: (fg * alpha + bg * (255 - alpha)) / 255
+        # This must fit in u16 space.
+
+        blend_alpha = 255 if blend_alpha is None else blend_alpha
+
+        alpha_u16 = alpha.to(torch.int32)
+        alpha_u16 = (alpha_u16 * blend_alpha) / 255
+
+        fg = fg.to(torch.int32)
+        bg = bg.to(torch.int32)
+        blended = (fg * alpha_u16 + bg * (255 - alpha_u16)) / 255
+
+        res = blended.to(dtype=torch.uint8)
+        return res
+    else:
+        raise NotImplementedError("missing blend for dtype {}".format(fg.dtype))
 
 
 def augment_jpg_roundtrip(img, quality=50):
     desired_device = img.device
     # print(desired_device)
     # Go from floats to u8
-    img = (img * 255.0).to(dtype=torch.uint8).to("cpu")
-    # print(img)
+    inputtype = img.dtype
+    if img.dtype == torch.float:
+        img = (img * 255.0).to(dtype=torch.uint8).to("cpu")
+    elif img.dtype == torch.uint8:
+        img = img.to("cpu")
+    else:
+        raise NotImplementedError(
+            "missing augment_jpg_roundtrip for dtype {}".format(fg.dtype)
+        )
     encoded = encode_jpeg(img, quality=quality)
     # print(encoded)
     # print(desired_device)
-    return (decode_jpeg(encoded)).to(dtype=torch.float, device=desired_device) / 255.0
+    if inputtype == torch.float:
+        return (decode_jpeg(encoded)).to(
+            dtype=torch.float, device=desired_device
+        ) / 255.0
+    else:
+        return (decode_jpeg(encoded)).to(device=desired_device)
 
 
 def rng_choice(rng, container):
@@ -166,6 +197,13 @@ def load_image_file(d, device):
     return image
 
 
+def load_image_file_u8(d, device):
+    image = Image.open(d)
+    image = F.pil_to_tensor(image)
+    image = image.to(device)
+    return image
+
+
 class ImageLoader:
     def __init__(
         self,
@@ -173,11 +211,13 @@ class ImageLoader:
         crop_size: None | tuple[int, int] = None,
         device: torch.device | str = "cpu",
         remove_alpha=False,
+        as_u8=False,
     ):
         self._crop_top_left = crop_top_left
         self._crop_size = crop_size
         self._device = device
         self._remove_alpha = remove_alpha
+        self._as_u8 = as_u8
 
     @staticmethod
     def background_loader(image_dir, **kwargs):
@@ -196,7 +236,10 @@ class ImageLoader:
         return v.load_images(image_dir)
 
     def load_image(self, d):
-        image = load_image_file(d, device=self._device)
+        if self._as_u8:
+            image = load_image_file_u8(d, device=self._device)
+        else:
+            image = load_image_file(d, device=self._device)
         left, top = (0, 0) if self._crop_top_left is None else self._crop_top_left
         width, height = (
             (image.shape[2] - left, image.shape[1] - top)
@@ -214,7 +257,7 @@ class ImageLoader:
         # Background images may have an alpha channel, but we don't want that.
         if self._remove_alpha:
             if image.shape[0] == 4:
-                image = image[0:3, :, :]
+                image = image[0:3, :, :].clone()
         return image
 
     def load_images(self, image_dir: Path) -> list[Tensor]:
@@ -351,7 +394,14 @@ class DatasetGenerator:
 
     @staticmethod
     def image_overlay(
-        background, foreground, b_x, b_y, f_x, f_y, return_overlay=False
+        background,
+        foreground,
+        b_x,
+        b_y,
+        f_x,
+        f_y,
+        return_overlay=False,
+        dtype=torch.float,
     ) -> Tensor:
         # We've selected the position in the canvas, and the position in the overlay.
         # next, we have to determine the rectangle in which the bounds overlap.
@@ -390,7 +440,7 @@ class DatasetGenerator:
         if return_overlay:
             mask = torch.zeros(
                 background.shape,
-                dtype=torch.float,
+                dtype=dtype,
             )
 
         # Handle two situations where the intersection is disjoint; ie; the overlay is outside of the bg.
@@ -409,7 +459,12 @@ class DatasetGenerator:
             background[:, y1:y2, x1:x2] = foreground[:, fg_y1:fg_y2, fg_x1:fg_x2]
         else:
             background[0:3, y1:y2, x1:x2] = foreground[0:3, fg_y1:fg_y2, fg_x1:fg_x2]
-            background[3, :, :] = 1.0
+            if dtype == torch.float:
+                background[3, :, :] = 1.0
+            elif dtype == torch.uint8:
+                background[3, :, :] = 255
+            else:
+                raise NotImplementedError("dtype not supported")
 
         if return_overlay:
             mask[:, y1:y2, x1:x2] = foreground[:, fg_y1:fg_y2, fg_x1:fg_x2]
@@ -805,7 +860,7 @@ class Applicator:
 
             sub_canvas = torch.zeros(
                 (4, canvas.shape[1], canvas.shape[2]),
-                dtype=torch.float,
+                dtype=torch.uint8,
                 device=self._device,
             )
 
@@ -816,7 +871,14 @@ class Applicator:
             c_y = int(c_height / 2)
 
             overlay_and_mask = DatasetGenerator.image_overlay(
-                sub_canvas, overlay, c_x, c_y, o_x, o_y, return_overlay=return_mask
+                sub_canvas,
+                overlay,
+                c_x,
+                c_y,
+                o_x,
+                o_y,
+                return_overlay=return_mask,
+                dtype=torch.uint8,
             )
             if return_mask:
                 sub_canvas, mask = overlay_and_mask
@@ -824,10 +886,13 @@ class Applicator:
                 sub_canvas = overlay_and_mask
 
             blend_alpha = self._determine_blend_alpha(rng, self._config.blend_alpha)
+            blend_alpha = int(blend_alpha * 255)
 
             fg_rgb = sub_canvas[:3]
-            fg_alpha = sub_canvas[3:] * blend_alpha  # (1, H, W)
-            canvas = alpha_blend(fg_rgb, canvas[:3, :, :], fg_alpha)
+            fg_alpha = sub_canvas[3:]  # (1, H, W)
+            canvas = alpha_blend(
+                fg_rgb, canvas[:3, :, :], fg_alpha, blend_alpha=blend_alpha
+            )
 
         for processor in self._post_process_image:
             canvas = processor.apply(rng, canvas)
@@ -858,10 +923,10 @@ class DataGenerator:
             if canvas is None:
                 canvas = torch.zeros(
                     (4, applicator.crop()[0], applicator.crop()[1]),
-                    dtype=torch.float,
+                    dtype=torch.uint8,
                     device=self._device,
                 )
-                canvas[3, :, :] = 1.0
+                canvas[3, :, :] = 255
 
             # Check if this layer is supposed to apply.
             if rng.random() >= applicator.ratio():
@@ -880,7 +945,7 @@ class DataGenerator:
             canvas = post_processor.apply(rng, canvas)
 
         # Perform the masking.
-        mask = mask[3, :, :] >= self._config.mask_alpha
+        mask = mask[3, :, :] >= self._config.mask_alpha * 255
         mask = mask.to(torch.int64)
 
         return canvas, mask
@@ -950,6 +1015,7 @@ class DataPipeline:
                 crop_size=input_group.size,
                 remove_alpha=input_group.remove_alpha,
                 device=lookup_device(input_group.device),
+                as_u8=True,
             )
 
             for subdir in input_group.dirs:
@@ -1035,11 +1101,13 @@ class DataPipeline:
     def generate_with_generator(
         self, index: int, rng: np.random.Generator
     ) -> tuple[Tensor, Tensor]:
-        return self._generators[index].generate(rng)
+        img, mask = self._generators[index].generate(rng)
+        img = img.to(torch.float) / 255.0
+        return img, mask
 
     def generate(self, rng: np.random.Generator) -> tuple[Tensor, Tensor]:
         choice = rng.choice(range(len(self._generators)), p=self._generator_weights)
-        return self._generators[choice].generate(rng)
+        return self.generate_with_generator(choice, rng)
 
     def batch_generator_fun(self, rng: np.random.Generator) -> Any:
         def batch_generator(batch_size):
