@@ -71,7 +71,14 @@ config:
             count:
                 min: 0
                 max: 3
-    inputs:
+        text_applicator:
+            ratio: 1.0
+            position_x: { mean: 0.5, sigma: 0.1, by_self: false }
+            position_y: { mean: 0.5, sigma: 0.1, by_self: false }
+            count:
+                min: 1
+                max: 1
+    image_groups:
         bg_LevelOne:
             dirs: [LevelOne]
             <<: *bg_input
@@ -91,11 +98,24 @@ config:
     glyphsets:
         example_glyphset:
             config: ./example_glyphset/test_font.yaml
+    text_groups:
+        overlay_text:
+            glyph_set: example_glyphset
+            canvas_height: 30
+            canvas_baseline: 15
+            background_color_rgba_u8: [0, 0, 0, 255]
+            text_lines:
+                - abb
+                - abc
+                - pap
+                - pac
+
     generator:
         - inputs:
               - [bg_applicator, "bg_{label}"]
               - [fg_applicator, "fg_{label}"]
               - [unit_applicator, map_units]
+              - [text_applicator, overlay_text]
           for_input_keys:
               label: [LevelOne, LevelTwo]
           <<: *data_meta

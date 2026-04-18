@@ -2,7 +2,7 @@
 #
 
 import time
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Union
@@ -617,6 +617,76 @@ class ImageApplicatorConfig(BaseModel):
     post_process_image: list[str] = []
 
 
+class TextGenerationConfig(BaseModel):
+    # Key that maps to the glyphs sets.
+    glyph_set: str
+
+    # The height of the text canvas
+    canvas_height: int
+
+    # WHere on the canvas to place the baseline
+    canvas_baseline: int
+
+    # THe margin added to the determined text width on the left
+    margin_left: int = 0
+    # THe margin added to the determined text width on the right
+    margin_right: int = 0
+    # Text file with each line a possible string option to pick from.
+    text_lines: Path | list[str]
+    # Background color to use before drawing the text.
+    background_color_rgba_u8: tuple[int, int, int, int] | None = None
+
+
+class OverlaySource(ABC):
+    @abstractmethod
+    def get_count(self) -> int:
+        pass
+
+    @abstractmethod
+    def create(self, rng: np.random.Generator) -> Tensor:
+        pass
+
+
+class ImagePicker(OverlaySource):
+    def __init__(self, collection: list[Tensor]):
+        self._collection = collection
+
+    def get_count(self) -> int:
+        return len(self._collection)
+
+    def create(self, rng: np.random.Generator) -> Tensor:
+        return rng_choice(rng, self._collection)
+
+
+class TextSource(OverlaySource):
+    def __init__(
+        self, config: TextGenerationConfig, config_file: Path, glyphset: Glyphset
+    ):
+        self._config = config
+        if isinstance(self._config.text_lines, Path):
+            text_line_path = config_file.parent / self._config.text_lines
+            if not text_line_path.is_file():
+                raise FileNotFoundError(f"Failed to open {text_line_path}")
+            with open(text_line_path, "r") as f:
+                self._config.text_lines = f.read().splitlines()
+        self._glyphset = glyphset
+
+    def get_count(self) -> int:
+        return len(self._config.text_lines)
+
+    def create(self, rng: np.random.Generator) -> Tensor:
+        chosen_text = rng_choice(rng, self._config.text_lines)
+        tokens = list(chosen_text[:])
+        width = self._glyphset.typeset_width(tokens)
+        canvas_width = width + self._config.margin_left + self._config.margin_right
+        canvas_height = self._config.canvas_height
+        canvas = torch.zeros((4, canvas_height, canvas_width))
+        self._glyphset.typeset(
+            canvas, tokens, x=self._config.margin_left, y=self._config.canvas_baseline
+        )
+        return (canvas * 255.0).to(torch.uint8)
+
+
 class DataPostprocess(BaseModel):
     # Name of the postprocessing function.
     function: str
@@ -753,8 +823,8 @@ class DataConfig(BaseModel):
     base_dir: Path = Path()
     process_device: str = "auto"
     image_applicators: dict[str, ImageApplicatorConfig]
-    # text_applicators: dict[str, TextApplicator] = {}
-    inputs: dict[str, DataInput]
+    text_groups: dict[str, TextGenerationConfig] = {}
+    image_groups: dict[str, DataInput]
     generator: list[DataStack]
     post_process: dict[str, DataPostprocess] = {}
     glyphsets: dict[str, GlyphsetConfig] = {}
@@ -825,13 +895,13 @@ class ImageApplicator:
         self,
         rng: np.random.Generator,
         canvas: Tensor,
-        overlays: list[Tensor],
+        overlay_source: OverlaySource,
         return_mask: bool = False,
     ) -> tuple[Tensor, Tensor | None]:
         canvas = canvas
         mask = None
         for i in range(self._get_count(rng)):
-            overlay = rng_choice(rng, overlays)
+            overlay = overlay_source.create(rng)
             o_height, o_width = overlay.shape[1:]
             c_height, c_width = canvas.shape[1:]
 
@@ -928,18 +998,27 @@ class DataGenerator:
         return canvas, mask
 
     def first_input_count(self) -> int:
-        return len(self._stack[0][1])
+        return self._stack[0][1].get_count()
 
 
 class DataPipeline:
     def __init__(self, config_file: Path | None = None, full_init=True):
+        self._config_file = config_file
         if config_file is not None:
             with open(config_file) as f:
                 d = yaml.safe_load(f)
             self._data_config = DataConfig.model_validate(d["config"])
             print(self._data_config)
             self._device = lookup_device(self._data_config.process_device)
-            self.load_inputs()
+            self.load_input_groups()
+
+            data_generator_intersection = set(
+                self._data_config.image_groups.keys()
+            ).intersection(self._data_config.text_groups.keys())
+            if data_generator_intersection:
+                raise KeyError(
+                    f"The key {data_generator_intersection} exists in both image_groups and text_groups"
+                )
 
         if full_init:
             self.post_image_init()
@@ -949,6 +1028,7 @@ class DataPipeline:
         self.load_postprocess()
         self.load_applicators()
         self.load_glyphsets()
+        self.load_text_groups()
         self.create_generators()
         self.calculate_generator_weights()
 
@@ -957,19 +1037,19 @@ class DataPipeline:
         validation_pipeline = DataPipeline(full_init=False)
         validation_pipeline._data_config = self._data_config
         validation_pipeline._device = self._device
-        validation_pipeline._inputs = {}
-        for name, input_group in self._data_config.inputs.items():
+        validation_pipeline._input_groups = {}
+        for name, input_group in self._data_config.image_groups.items():
             if input_group.validation_split:
-                images = self._inputs[name][:]
+                images = self._input_groups[name][:]
                 images = rng_shuffle(rng, images)
 
                 total_bg = len(images)
                 validation_bg_split = int(total_bg * ratio)
                 validation_entries = images[0:validation_bg_split]
-                self._inputs[name] = images[validation_bg_split + 1 :]
-                validation_pipeline._inputs[name] = validation_entries
+                self._input_groups[name] = images[validation_bg_split + 1 :]
+                validation_pipeline._input_groups[name] = validation_entries
             else:
-                validation_pipeline._inputs[name] = self._inputs[name]
+                validation_pipeline._input_groups[name] = self._input_groups[name]
 
         validation_pipeline.post_image_init()
         return validation_pipeline
@@ -979,14 +1059,14 @@ class DataPipeline:
         return Path(path_as_str.format(base_dir=self._data_config.base_dir))
 
     def print_inputs(self):
-        for name, images in self._inputs.items():
+        for name, images in self._input_groups.items():
             print(
                 f"Inputs: {name} has {len(images)} images with {images[0].shape} size on {images[0].device}"
             )
 
-    def load_inputs(self):
-        self._inputs = {}
-        for name, input_group in self._data_config.inputs.items():
+    def load_input_groups(self):
+        self._input_groups = {}
+        for name, input_group in self._data_config.image_groups.items():
             this_set = []
             loader = ImageLoader(
                 crop_top_left=input_group.top_left,
@@ -1009,22 +1089,33 @@ class DataPipeline:
                         full_dir,
                     )
                 )
-            self._inputs[name] = this_set
+            self._input_groups[name] = this_set
 
     def load_glyphsets(self):
         self._glyphsets = {}
         for name, input_group in self._data_config.glyphsets.items():
             self._glyphsets[name] = Glyphset(input_group.config)
 
+    def load_text_groups(self):
+        self._text_groups = {}
+        for name, input_group in self._data_config.text_groups.items():
+            glyphset = self._glyphsets.get(input_group.glyph_set)
+            if glyphset is None:
+                raise ValueError(f"Glyphset {input_group.glyph_set} not found")
+
+            self._text_groups[name] = TextSource(
+                input_group, config_file=self._config_file, glyphset=glyphset
+            )
+
     def input_augment(self):
-        for name, input_group in self._data_config.inputs.items():
-            these_images = self._inputs[name]
+        for name, input_group in self._data_config.image_groups.items():
+            these_images = self._input_groups[name]
             new_images = []
             for augmentation in input_group.augmentations:
                 if augmentation == "flip_horizontal":
                     for img in these_images:
                         new_images.append(torch.flip(img, [2]))
-            self._inputs[name].extend(new_images)
+            self._input_groups[name].extend(new_images)
 
     def load_applicators(self):
         self._image_applicators = {}
@@ -1058,8 +1149,18 @@ class DataPipeline:
                     applicator_name = applicator_name.format(**substitutions)
                     collection_name = collection_name.format(**substitutions)
                     applicator = self._image_applicators[applicator_name]
-                    images = self._inputs[collection_name]
-                    typed_stack.append((applicator, images))
+                    if collection_name in self._input_groups:
+                        overlay_source = ImagePicker(
+                            self._input_groups[collection_name]
+                        )
+                    elif collection_name in self._text_groups:
+                        overlay_source = self._text_groups[collection_name]
+                    else:
+                        raise KeyError(
+                            f"Could not find collection name anywhere: {collection_name}"
+                        )
+
+                    typed_stack.append((applicator, overlay_source))
                 # Collect postprocessors
                 post_processors = []
                 for post_process_name in config.post_process:
