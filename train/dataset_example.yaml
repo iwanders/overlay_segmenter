@@ -1,11 +1,14 @@
-_data_meta: &data_meta
-    mask_layer: 1
-    mask_alpha: 0.5
-
-_post_process: &post_process
-    - fine_blur
-    - jpeg
-    - fine_blur_jpg
+train_config:
+    learning_rate: 0.00025
+    multi_step_lr:
+        gamma: 0.2
+        milestones: [60, 200, 600, 1200]
+    batch_count: 40
+    batch_size: 4
+    validation_ratio: 0.51
+    manual_seed: 3
+    model_seed: 4
+    generation_seed: 42
 
 _bg_input: &bg_input
     remove_alpha: true
@@ -22,7 +25,7 @@ _fg_input: &fg_input
     remove_alpha: false
     base_dir: "{base_dir}/foreground/"
 
-config:
+data_config:
     base_dir: "../../dataset_example/"
     post_process:
         fine_blur: &blur_cfg
@@ -64,7 +67,7 @@ config:
                 rgb:
                     max:
                         min: 0.2
-                        max: 0.2
+                        max: 0.3
             ratio: 1.0
         text_color_brightness:
             function: combined
@@ -151,5 +154,9 @@ config:
               - [text_applicator, overlay_text]
           for_input_keys:
               label: [LevelOne, LevelTwo]
-          <<: *data_meta
-          post_process: *post_process
+          mask_layer: 1
+          mask_alpha: 0.5
+          post_process:
+              - fine_blur
+              - jpeg
+              - fine_blur_jpg

@@ -3,6 +3,7 @@
 #
 # https://docs.pytorch.org/tutorials/beginner/introyt/trainingyt.html#the-training-loop
 import json
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +11,8 @@ from pathlib import Path
 import numpy as np
 import torch
 import torchvision
+import yaml
+from pydantic import BaseModel
 
 from dataset_generator import (
     DataPipeline,
@@ -20,26 +23,48 @@ from util import (
     lookup_device,
 )
 
+
+class MultiStepLRConfig(BaseModel):
+    milestones: list[int] = []
+    gamma: float = 0.2
+
+
+class TrainConfig(BaseModel):
+    learning_rate: float = 0.00025
+    multi_step_lr: MultiStepLRConfig | None = None
+    batch_count: int = 40
+    batch_size: int = 4
+    validation_ratio: float = 0.1
+    manual_seed: int = 3
+    model_seed: int = 4
+    generation_seed: int = 42
+
+
+config_file = "dataset.priv.yaml"
+if len(sys.argv) > 1:
+    config_file = sys.argv[1]
+
+with open(config_file) as f:
+    d = yaml.safe_load(f)
+train_config = TrainConfig.model_validate(d.get("train_config", {}))
 device = lookup_device("auto")
 print(f"Using device: {device}")
 
 torch.backends.cudnn.benchmark = False
-# torch.use_deterministic_algorithms(True)  < nll_loss2d_forward_out_cuda_template :/
-torch.manual_seed(3)
-# Currently, tile size needs to be smaller than the overlay tiles.
-# tile_size = (400, 400)
-tile_size = (256, 256)
-alpha_factor = 0.5
+torch.manual_seed(train_config.manual_seed)
+
 
 # training_set = []
 validation_set = []
 
 
-config_file = "dataset.priv.yaml"
 train_pipeline = DataPipeline(config_file=config_file, full_init=False)
-rng = np.random.default_rng(3)
+print(f"train_config: {train_config}")
+rng = np.random.default_rng(train_config.generation_seed)
 
-validation_pipeline = train_pipeline.split_validation(rng=rng, ratio=0.1)
+validation_pipeline = train_pipeline.split_validation(
+    rng=rng, ratio=train_config.validation_ratio
+)
 train_pipeline.post_image_init()
 
 
@@ -83,8 +108,7 @@ epoch_number = 0
 EPOCHS = 10000
 
 best_vloss = 1_000_000.0
-model_seed = 3
-torch.manual_seed(model_seed)
+torch.manual_seed(train_config.model_seed)
 model = Unet(channels_in=3, channels_out=2)
 model.to(device)
 
@@ -92,15 +116,20 @@ model.to(device)
 # optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
 # learning_rate = 0.001  # for batch size of 4. Works well, plateau at 300, but saw one spike.
 # learning_rate = 0.001  # for batch size of 4.
-learning_rate = 0.00025  # Lowering it because data is more complex now.
+# learning_rate = 0.00025  # Lowering it because data is more complex now.
+learning_rate = (
+    train_config.learning_rate
+)  # Lowering it because data is more complex now.
 # learning_rate = 0.005
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
-scheduler = torch.optim.lr_scheduler.MultiStepLR(
-    optimizer,
-    milestones=[40, 120, 600, 1000],
-    gamma=0.2,
-)
+scheduler = None
+if train_config.multi_step_lr:
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(
+        optimizer,
+        milestones=train_config.multi_step_lr.milestones,
+        gamma=train_config.multi_step_lr.gamma,
+    )
 
 
 loss_fn = torch.nn.CrossEntropyLoss()
@@ -182,7 +211,8 @@ def train_one_epoch(epoch_index):
             # tb_writer.add_scalar("Loss/train", last_loss, tb_x)
             running_loss = 0.0
         """
-    scheduler.step()
+    if scheduler:
+        scheduler.step()
     return epoch_loss / count
 
 
@@ -257,9 +287,8 @@ for epoch in range(EPOCHS):
                     torchvision.utils.save_image(
                         this_target.to(torch.float), target_img
                     )
-                    if epoch < 1000:
-                        image_img = epoch_dir / f"eval_{real_i:0>5}_image.png"
-                        torchvision.utils.save_image(vinputs[frame_i, :, :], image_img)
+                    image_img = epoch_dir / f"eval_{real_i:0>5}_image.png"
+                    torchvision.utils.save_image(vinputs[frame_i, :, :], image_img)
 
     end_validation = time.time()
     avg_vloss = running_vloss / (i + 1)

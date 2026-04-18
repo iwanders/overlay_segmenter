@@ -1197,7 +1197,7 @@ class DataPipeline:
             self._config_file = Path(config_file)
             with open(config_file) as f:
                 d = yaml.safe_load(f)
-            self._data_config = DataConfig.model_validate(d["config"])
+            self._data_config = DataConfig.model_validate(d["data_config"])
             print(self._data_config)
             self._device = lookup_device(self._data_config.process_device)
             self.load_input_groups()
@@ -1237,7 +1237,7 @@ class DataPipeline:
                 total_bg = len(images)
                 validation_bg_split = int(total_bg * ratio)
                 validation_entries = images[0:validation_bg_split]
-                self._input_groups[name] = images[validation_bg_split + 1 :]
+                self._input_groups[name] = images[validation_bg_split:]
                 validation_pipeline._input_groups[name] = validation_entries
             else:
                 validation_pipeline._input_groups[name] = self._input_groups[name]
