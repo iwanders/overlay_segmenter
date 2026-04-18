@@ -17,6 +17,7 @@ from torch import Tensor
 from torchvision.io import decode_jpeg, encode_jpeg
 
 from letter_support import Glyphset
+from pytorch_contrib import _hsv_to_rgb, _rgb_to_hsv
 from util import (
     load_image_file,
     load_image_file_u8,
@@ -650,6 +651,7 @@ class ImageApplicatorConfig(BaseModel):
     # Crop the applied image to this size, if the first image, this determines the canvas size.
     crop: Union[None, tuple[int, int]] = None
 
+    pre_process_image: list[str] = []
     post_process_image: list[str] = []
 
 
@@ -711,7 +713,6 @@ class TextSource(OverlaySource):
 
         necessary_characters = set("".join(self._config.text_lines))
         have_characters = set([a.tokens() for a in self._glyphset.glyphs()])
-        print(necessary_characters)
         missing = necessary_characters - have_characters
         if config.skip_missing_characters:
 
@@ -801,6 +802,16 @@ class PostProcess:
                     postprocess_config.config,
                     ratio=postprocess_config.ratio,
                 )
+            case "hsv_transform":
+                return PostprocessHsvTransform(
+                    postprocess_config.config,
+                    ratio=postprocess_config.ratio,
+                )
+            case "channel_clamp":
+                return PostprocessChannelClamp(
+                    postprocess_config.config,
+                    ratio=postprocess_config.ratio,
+                )
             case _ as missing:
                 raise NotImplementedError(f"Not implemented postprocess: {missing}")
 
@@ -872,6 +883,69 @@ class PostprocessCombined(PostProcess):
         return res.to(tensor.device)
 
 
+class PostprocessHsvTransform(PostProcess):
+    def __init__(self, config, ratio):
+        super().__init__(ratio)
+
+        self._h_min = config.get("hue", {}).get("min", 0.0)
+        self._h_max = config.get("hue", {}).get("max", 0.0)
+        self._s_min = config.get("saturation", {}).get("min", 0.0)
+        self._s_max = config.get("saturation", {}).get("max", 0.0)
+        self._v_min = config.get("value", {}).get("min", 0.0)
+        self._v_max = config.get("value", {}).get("max", 0.0)
+
+    def apply(self, rng: np.random.Generator, tensor: Tensor) -> Tensor:
+        if not self.should_apply(rng):
+            return tensor
+
+        h = rng.uniform(self._h_min, self._h_max)
+        s = rng.uniform(self._s_min, self._s_max)
+        v = rng.uniform(self._v_min, self._v_max)
+
+        tensor = tensor.clone().to(torch.float) / 255.0
+        rgb = tensor[0:3, :, :]
+        # alpha = tensor[3:, :, :]
+
+        # _hsv_to_rgb, _rgb_to_hsv
+        as_hsv = _rgb_to_hsv(rgb)
+
+        a_h: Tensor = as_hsv[0, :, :]
+        a_h += h
+        as_hsv[0, :, :] = a_h.remainder(1.0)
+
+        a_s: Tensor = as_hsv[1, :, :]
+        a_s += s
+        as_hsv[1, :, :] = a_s.clamp(0, 1.0)
+
+        a_v: Tensor = as_hsv[2, :, :]
+        a_v += v
+        as_hsv[2, :, :] = a_v.clamp(0, 1.0)
+
+        as_rgb = _hsv_to_rgb(as_hsv)
+        tensor[0:3, :, :] = as_rgb
+
+        return (tensor * 255.0).to(torch.uint8).to(tensor.device)
+
+
+class PostprocessChannelClamp(PostProcess):
+    def __init__(self, config, ratio):
+        super().__init__(ratio)
+
+        self._rgb_min_min = config.get("rgb", {}).get("min", {}).get("min", 0.0)
+        self._rgb_min_max = config.get("rgb", {}).get("min", {}).get("max", 0.0)
+        self._rgb_max_min = config.get("rgb", {}).get("max", {}).get("min", 1.0)
+        self._rgb_max_max = config.get("rgb", {}).get("max", {}).get("max", 1.0)
+
+    def apply(self, rng: np.random.Generator, tensor: Tensor) -> Tensor:
+        if not self.should_apply(rng):
+            return tensor
+        rgb_clamp_min = rng.uniform(self._rgb_min_min, self._rgb_min_max)
+        rgb_clamp_max = rng.uniform(self._rgb_max_min, self._rgb_max_max)
+        tensor = tensor.clone().to(torch.float) / 255.0
+        tensor[0:3, :, :] = tensor[0:3, :, :].clamp(rgb_clamp_min, rgb_clamp_max)
+        return (tensor * 255.0).to(torch.uint8).to(tensor.device)
+
+
 class DataStack(BaseModel):
     # List of inputs, (key of DataApplicator, key of DataInput)
     inputs: list[tuple[str, str]]
@@ -907,6 +981,7 @@ class ImageApplicator:
     ):
         self._config = config
         self._device = device
+        self._pre_process_image = [post_processors[k] for k in config.pre_process_image]
         self._post_process_image = [
             post_processors[k] for k in config.post_process_image
         ]
@@ -971,6 +1046,8 @@ class ImageApplicator:
         placed = []
         for i in range(self._get_count(rng)):
             overlay = overlay_source.create(rng)
+            for preprocessor in self._pre_process_image:
+                overlay = preprocessor.apply(rng, overlay)
             o_height, o_width = overlay.shape[1:]
             c_height, c_width = canvas.shape[1:]
 
@@ -1117,6 +1194,7 @@ class DataPipeline:
     def __init__(self, config_file: Path | None = None, full_init=True):
         self._config_file = config_file
         if config_file is not None:
+            self._config_file = Path(config_file)
             with open(config_file) as f:
                 d = yaml.safe_load(f)
             self._data_config = DataConfig.model_validate(d["config"])
@@ -1150,6 +1228,7 @@ class DataPipeline:
         validation_pipeline._data_config = self._data_config
         validation_pipeline._device = self._device
         validation_pipeline._input_groups = {}
+        validation_pipeline._config_file = self._config_file
         for name, input_group in self._data_config.image_groups.items():
             if input_group.validation_split:
                 images = self._input_groups[name][:]
@@ -1320,7 +1399,7 @@ def test_new_spec():
     config_file = "dataset_example.yaml"
     if len(sys.argv) > 1:
         config_file = sys.argv[1]
-    z = DataPipeline(config_file)
+    z = DataPipeline(Path(config_file))
     print(z)
     rng = np.random.default_rng(3)
     generated = []

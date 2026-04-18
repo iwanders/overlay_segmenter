@@ -112,6 +112,8 @@ class GlyphSort:
         # 4. Alpha Blending Formula
         # Porter-Duff Over
         # https://en.wikipedia.org/wiki/Alpha_compositing
+        # This still doesn't look perfect... perhaps that whole alpha pre-multiplied or not?
+        # Does it matter?
         out_a = front_a + ((back_a * (255 - front_a)) + 127) // 255
         subterm = (back_rgb * back_a * (255 - front_a)) // 255
         out_rgb = (front_rgb * front_a + subterm) // (out_a + 1)
