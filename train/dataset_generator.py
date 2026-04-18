@@ -598,7 +598,7 @@ class DataInput(BaseModel):
     validation_split: bool = False
 
 
-class DataApplicator(BaseModel):
+class ImageApplicatorConfig(BaseModel):
     # Ratio of data samples to apply this to.
     ratio: float = 1.0
     # Count to apply when this is applied.
@@ -752,17 +752,18 @@ class GlyphsetConfig(BaseModel):
 class DataConfig(BaseModel):
     base_dir: Path = Path()
     process_device: str = "auto"
-    applicators: dict[str, DataApplicator]
+    image_applicators: dict[str, ImageApplicatorConfig]
+    # text_applicators: dict[str, TextApplicator] = {}
     inputs: dict[str, DataInput]
     generator: list[DataStack]
     post_process: dict[str, DataPostprocess] = {}
     glyphsets: dict[str, GlyphsetConfig] = {}
 
 
-class Applicator:
+class ImageApplicator:
     def __init__(
         self,
-        config: DataApplicator,
+        config: ImageApplicatorConfig,
         device: torch.device,
         post_processors: dict[str, PostProcess],
     ):
@@ -879,7 +880,7 @@ class Applicator:
 class DataGenerator:
     def __init__(
         self,
-        stack: list[tuple[Applicator, list[Tensor]]],
+        stack: list[tuple[ImageApplicator, list[Tensor]]],
         config: DataStack,
         device: torch.device,
         post_processors: list[PostProcess],
@@ -1026,9 +1027,9 @@ class DataPipeline:
             self._inputs[name].extend(new_images)
 
     def load_applicators(self):
-        self._applicators = {}
-        for name, applicator_config in self._data_config.applicators.items():
-            self._applicators[name] = Applicator(
+        self._image_applicators = {}
+        for name, applicator_config in self._data_config.image_applicators.items():
+            self._image_applicators[name] = ImageApplicator(
                 applicator_config,
                 device=self._device,
                 post_processors=self._postprocess,
@@ -1056,7 +1057,7 @@ class DataPipeline:
                 for applicator_name, collection_name in config.inputs:
                     applicator_name = applicator_name.format(**substitutions)
                     collection_name = collection_name.format(**substitutions)
-                    applicator = self._applicators[applicator_name]
+                    applicator = self._image_applicators[applicator_name]
                     images = self._inputs[collection_name]
                     typed_stack.append((applicator, images))
                 # Collect postprocessors

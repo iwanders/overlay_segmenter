@@ -49,7 +49,7 @@ config:
             function: flip_horizontal
             ratio: 0.5
 
-    applicators:
+    image_applicators:
         bg_applicator:
             ratio: 1.0
             position_x: { mean: 0.5, sigma: 0.15, by_self: true }
