@@ -42,6 +42,19 @@ if __name__ == "__main__":
         # fontweight="bold",
     )
 
+    max_epoch = epoch[-1]
+    max_t = d[-1]["elapsed_time"]
+    plt.axvline(x=max_epoch, color="black", linestyle="--", linewidth=0.5)
+    plt.text(
+        max_epoch,
+        0,
+        f"epoch {max_epoch}, t: {max_t:.2f}",
+        color="black",
+        ha="right",
+        va="bottom",
+        # fontweight="bold",
+    )
+
     plt.xlabel("Epochs")
     plt.ylabel("loss")
     plt.ylim([0.0, 0.4])

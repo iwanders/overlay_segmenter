@@ -146,11 +146,15 @@ if train_config.multi_step_lr:
     )
 
 epoch_start = 0
+stats = []
 if args.load_checkpoint:
     checkpoint = torch.load(args.load_checkpoint, weights_only=True)
 
     model.load_state_dict(checkpoint["model_state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    if scheduler:
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+    stats = checkpoint["stats"]
 
     epoch_start = checkpoint["epoch"] + 1
 
@@ -239,7 +243,6 @@ def train_one_epoch(epoch_index):
     return epoch_loss / count
 
 
-stats = []
 save_model = True
 start_time = time.time()
 for epoch in range(epoch_start, train_config.epoch_stop):
@@ -321,7 +324,7 @@ for epoch in range(epoch_start, train_config.epoch_stop):
     epoch_record["elapsed_time"] = elapsed_time
     print(f"LOSS train {avg_loss} valid {avg_vloss}")
     print(
-        "Train: {:.3} s validation: {:.3} s total: {:.3} s  elapsed {:.3}".format(
+        "Train: {:.3f} s validation: {:.3f} s total: {:.3f} s  elapsed {:.3f}".format(
             end_train - start_train,
             end_validation - start_validation,
             end_validation - start_train,
@@ -337,12 +340,16 @@ for epoch in range(epoch_start, train_config.epoch_stop):
         best_vloss = avg_vloss
         # model_path = "/tmp/model_{}_{}".format(timestamp, epoch_number)
         model_path = epoch_dir / "model.pth"
+        to_store = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "stats": stats,
+        }
+        if scheduler:
+            to_store["scheduler_state_dict"] = scheduler.state_dict()
         torch.save(
-            {
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-            },
+            to_store,
             model_path,
         )
         print(f"saved model to {model_path}")
