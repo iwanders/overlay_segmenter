@@ -107,6 +107,29 @@ scheduler = torch.optim.lr_scheduler.MultiStepLR(
 
 
 loss_fn = torch.nn.CrossEntropyLoss()
+"""
+todo? Requires propagation of the loss weight mask, or calc on the fly, but that's less than ideal.
+Per pixel weighted loss;
+Initialize Loss with No Reduction: Set reduction='none' when creating the loss function. This returns a loss value for every individual pixel instead of a single scalar 
+Element-wise Multiplication: Multiply the resulting loss tensor by your weight map (a tensor of the same spatial dimensions, e.g., )  
+Manual Reduction: Compute the mean or sum of the weighted loss to obtain the final scalar for backpropagation  
+
+Something like;
+# 1. Setup loss with reduction='none'
+criterion = nn.CrossEntropyLoss(reduction='none')
+
+# Example Tensors: Batch size 1, 3 Classes, 256x256 Image
+logits = torch.randn(1, 3, 256, 256)
+target = torch.randint(0, 3, (1, 256, 256))
+# Custom per-pixel weights (e.g., higher for edges or small objects)
+pixel_weights = torch.rand(1, 256, 256) 
+
+# 2. Calculate unreduced loss
+loss_per_pixel = criterion(logits, target) # Shape: [1, 256, 256]
+
+# 3. Apply weights and manually reduce
+weighted_loss = (loss_per_pixel * pixel_weights).mean()
+"""
 
 
 def dump_stats(dir: Path, stats: dict):

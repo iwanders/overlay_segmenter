@@ -18,10 +18,6 @@ from torch import Tensor
 from torchvision.io import decode_jpeg, encode_jpeg
 from torchvision.transforms import ToTensor
 
-"""
-Todo; should put the images as u8 on the gpu... only go from u8 to floats when we are doing training.
-"""
-
 if torch.cuda.is_available():
     print(f"GPU: {torch.cuda.get_device_name(0)} is available.")
     preferred_device = torch.device("cuda:0")  # or "cuda" for the current device
