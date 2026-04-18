@@ -1,0 +1,15 @@
+image_path: "test_font.png"
+baseline: 17
+ascender: 5
+descender: 21
+#inter_character_minimum: 2
+glyphs:
+    - tokens: "a"
+    - tokens: "b"
+    - tokens: "c"
+    - tokens: "p"
+    - tokens: '"'
+      start: 85
+      end: 91
+    - tokens: "/"
+    - tokens: "-"
