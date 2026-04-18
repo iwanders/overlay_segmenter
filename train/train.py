@@ -2,9 +2,9 @@
 #
 #
 # https://docs.pytorch.org/tutorials/beginner/introyt/trainingyt.html#the-training-loop
+# https://netron.app/
 import argparse
 import json
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +40,7 @@ class TrainConfig(BaseModel):
     model_seed: int = 4
     generation_seed: int = 42
     epoch_stop: int = 100_000_000
+    output_dir: Path = Path("/tmp/train/")
 
 
 parser = argparse.ArgumentParser(prog="letter_support")
@@ -53,15 +54,19 @@ parser.add_argument(
     "-l",
     dest="load_checkpoint",
     help="The checkpoint file to load.",
+    type=Path,
     default=None,
 )
 
 args = parser.parse_args()
+if args.load_checkpoint is not None:
+    if not args.load_checkpoint.is_file():
+        raise KeyError(f"File {args.load_checkpoint} does not exist")
 
 
 with open(args.config_file) as f:
-    d = yaml.safe_load(f)
-train_config = TrainConfig.model_validate(d.get("train_config", {}))
+    loaded_config = yaml.safe_load(f)
+train_config = TrainConfig.model_validate(loaded_config.get("train_config", {}))
 device = lookup_device("auto")
 print(f"Using device: {device}")
 
@@ -89,7 +94,7 @@ validation_set = [(a.to(device), b.to(device)) for a, b in validation_set]
 
 if True:
     for i, (img, mask) in enumerate(validation_set):
-        epoch_dir = Path("/tmp/train/")
+        epoch_dir = train_config.output_dir / "validation"
         epoch_dir.mkdir(exist_ok=True, parents=True)
         out_path = epoch_dir / f"validation_{i:0>3}.png"
         torchvision.utils.save_image([img, torch.stack([mask, mask, mask])], out_path)
@@ -97,7 +102,7 @@ if True:
 
 resolution = tuple(validation_set[0][0].shape)
 # Larger batches (no change to learning rate) is not actually better?
-batch_size = 4
+batch_size = train_config.batch_size
 
 # Create data loaders for our datasets; shuffle for training, not for validation
 validation_loader = torch.utils.data.DataLoader(
@@ -105,7 +110,7 @@ validation_loader = torch.utils.data.DataLoader(
 )
 
 
-batch_count = 40
+batch_count = train_config.batch_count
 
 dynamic_training_gen = DynamicGenerator(
     batch_generator=train_pipeline.batch_generator_fun(rng),
@@ -137,28 +142,31 @@ learning_rate = (
 # learning_rate = 0.005
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
-scheduler = None
-if train_config.multi_step_lr:
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(
-        optimizer,
-        milestones=train_config.multi_step_lr.milestones,
-        gamma=train_config.multi_step_lr.gamma,
-    )
-
 epoch_start = 0
 stats = []
+start_time = time.time()
 if args.load_checkpoint:
     checkpoint = torch.load(args.load_checkpoint, weights_only=True)
 
     model.load_state_dict(checkpoint["model_state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    if scheduler:
-        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
+    # Do not do this, this also restores the milestones.
+    # if scheduler:
+    #    scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
     stats = checkpoint["stats"]
+    start_time -= checkpoint["elapsed_time"]
 
     epoch_start = checkpoint["epoch"] + 1
 
 
+if train_config.multi_step_lr:
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(
+        optimizer,
+        milestones=train_config.multi_step_lr.milestones,
+        gamma=train_config.multi_step_lr.gamma,
+        last_epoch=epoch_start - 1,
+    )
 loss_fn = torch.nn.CrossEntropyLoss()
 """
 todo? Requires propagation of the loss weight mask, or calc on the fly, but that's less than ideal.
@@ -222,7 +230,8 @@ def train_one_epoch(epoch_index):
         # Compute the loss and its gradients
         loss = loss_fn(outputs, labels)
         loss.backward()
-        print("batch loss", float(loss.detach()))
+        batch_loss_float = float(loss.detach())
+        print(f"batch loss: {batch_loss_float:.4f}")
         epoch_loss += float(loss.detach())
 
         # Adjust learning weights
@@ -243,8 +252,24 @@ def train_one_epoch(epoch_index):
     return epoch_loss / count
 
 
+def determine_save_dir_name(epoch: int):
+    if epoch < 10:
+        return f"{epoch:0>4}/"
+    # 10
+    if epoch < 100 and epoch % 10 == 0:
+        return f"{epoch:0>4}/"
+    # 20
+    if epoch < 1000 and epoch % 100 == 0:
+        return f"{epoch:0>4}/"
+    # 30
+    if epoch < 10000 and epoch % 1000 == 0:
+        return f"{epoch:0>4}/"
+    # 40
+    # 41 * checkpoint size
+    return "latest"
+
+
 save_model = True
-start_time = time.time()
 for epoch in range(epoch_start, train_config.epoch_stop):
     epoch_record = {}
     print("EPOCH {}:".format(epoch))
@@ -265,10 +290,7 @@ for epoch in range(epoch_start, train_config.epoch_stop):
     # statistics for batch normalization.
     model.eval()
 
-    epoch_dir = Path(f"/tmp/train/{epoch:0>3}/")
-
-    if epoch > 100:
-        epoch_dir = Path("/tmp/train/latest/")
+    epoch_dir = train_config.output_dir / determine_save_dir_name(epoch)
 
     start_validation = time.time()
     # Disable gradient computation and reduce memory consumption.
@@ -323,28 +345,35 @@ for epoch in range(epoch_start, train_config.epoch_stop):
     elapsed_time = float(time.time() - start_time)
     epoch_record["elapsed_time"] = elapsed_time
     print(f"LOSS train {avg_loss} valid {avg_vloss}")
+    current_learning_rate = learning_rate
+    if scheduler:
+        current_learning_rate = scheduler.get_last_lr()
     print(
-        "Train: {:.3f} s validation: {:.3f} s total: {:.3f} s  elapsed {:.3f}".format(
+        "Train: {:.3f} s validation: {:.3f} s total: {:.3f} s  elapsed {:.1f} lr: {}".format(
             end_train - start_train,
             end_validation - start_validation,
             end_validation - start_train,
             elapsed_time,
+            current_learning_rate,
         )
     )
 
     stats.append(epoch_record)
 
     # Track best performance, and save the model's state
-    if avg_vloss < best_vloss and save_model:
+    if save_model:  # avg_vloss < best_vloss and
         epoch_dir.mkdir(parents=True, exist_ok=True)
         best_vloss = avg_vloss
         # model_path = "/tmp/model_{}_{}".format(timestamp, epoch_number)
         model_path = epoch_dir / "model.pth"
+        save_start = time.time()
         to_store = {
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "stats": stats,
+            "loaded_config": loaded_config,
+            "elapsed_time": elapsed_time,
         }
         if scheduler:
             to_store["scheduler_state_dict"] = scheduler.state_dict()
@@ -352,7 +381,8 @@ for epoch in range(epoch_start, train_config.epoch_stop):
             to_store,
             model_path,
         )
-        print(f"saved model to {model_path}")
+        save_duration = time.time() - save_start
+        print(f"saved model to {model_path} in {save_duration:.2f} s")
 
     dump_stats(epoch_dir, stats)
     dump_stats(epoch_dir.parent, stats)

@@ -25,8 +25,9 @@ else:
 def load_model(path: Path, device=best_device) -> Unet:
     model = Unet(channels_in=3, channels_out=2)
 
-    state_dict = torch.load(path)
-    model.load_state_dict(state_dict)
+    checkpoint = torch.load(path, weights_only=True)
+
+    model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device)
     return model
 
