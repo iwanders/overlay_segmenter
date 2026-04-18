@@ -110,12 +110,11 @@ class GlyphSort:
         # print("front_a:", front_a.shape)
 
         # 4. Alpha Blending Formula
-        # Out = Front * AlphaF + Back * (1 - AlphaF)
-        # Note: Assumes top layer's alpha dictates composition
-        out_a = front_a + back_a * (255 - front_a)
-        out_rgb = (front_rgb * front_a * 255 + back_rgb * back_a * (255 - front_a)) // (
-            out_a * 255 + 1
-        )
+        # Porter-Duff Over
+        # https://en.wikipedia.org/wiki/Alpha_compositing
+        out_a = front_a + ((back_a * (255 - front_a)) + 127) // 255
+        subterm = (back_rgb * back_a * (255 - front_a)) // 255
+        out_rgb = (front_rgb * front_a + subterm) // (out_a + 1)
 
         # Combine RGB and Alpha
         result_t = torch.cat([out_rgb, out_a], dim=0)
@@ -235,7 +234,7 @@ class Glyphset:
         xpos = x
         previous_token: GlyphSort | None = None
         for i, t in enumerate(tokens):
-            print(f"Rendering {t} at {xpos}")
+            # print(f"Rendering {t} at {xpos}")
             if (
                 t != " "
                 and previous_token is not None
