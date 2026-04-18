@@ -16,7 +16,7 @@ import yaml
 from pydantic import BaseModel
 from torch import Tensor
 
-from dataset_generator import alpha_blend, load_image_file
+from dataset_generator import load_image_file
 
 
 class GlyphSpec(BaseModel):
@@ -38,6 +38,9 @@ class GlyphSpec(BaseModel):
 
     # Marks the character as a space (tab, " ", etc...)
     is_space: bool = False
+
+    # THis is not really a character it merely denotes a skipped character during the glyphset creation.
+    is_skipped: bool = False
 
 
 class FontSpec(BaseModel):
@@ -208,13 +211,20 @@ class Glyphset:
             glyph_image = self._line[:, :, glyph_start:glyph_end]
             if glyph_spec.baseline is None:
                 glyph_spec.baseline = self._spec.baseline - self._spec.ascender
-            self._glyphs.append(GlyphSort(glyph_spec, glyph_image))
+            if not glyph_spec.is_skipped:
+                self._glyphs.append(GlyphSort(glyph_spec, glyph_image))
             line_pos = glyph_end
 
     def glyphs(self) -> list[GlyphSort]:
         return self._glyphs
 
-    def typeset(self, canvas, tokens: list[str], x: int, y: int):
+    def typeset_width(self, tokens: list[str]) -> int:
+        return self._typeset_worker(canvas=None, tokens=tokens, x=0, y=0)
+
+    def typeset(self, canvas: Tensor, tokens: list[str], x: int, y: int):
+        self._typeset_worker(canvas=canvas, tokens=tokens, x=x, y=y)
+
+    def _typeset_worker(self, canvas: Tensor | None, tokens: list[str], x: int, y: int):
         """
         Typesets the list of tokens onto canvas, with baseline starting at pos.
         """
@@ -232,10 +242,12 @@ class Glyphset:
             glyph_set = self._glyph_sorts.get(t)
             if glyph_set is None:
                 raise KeyError(f"missing glyph {t}")
-            glyph_set.typeset(canvas, x=xpos, y=y)
+            if canvas is not None:
+                glyph_set.typeset(canvas, x=xpos, y=y)
             xpos += glyph_set.width()
 
             previous_token = glyph_set
+        return xpos
 
 
 def run_glyphset_dump(args):
@@ -250,9 +262,13 @@ def run_glyphset_dump(args):
 
 def run_typeset(args):
     glyphset = Glyphset(args.input)
+    tokens = args.text[:]
+    width = args.width
+    if width is None:
+        width = glyphset.typeset_width(tokens)
 
-    canvas = torch.zeros((4, args.height, args.width))
-    glyphset.typeset(canvas, (args.text[:]), x=0, y=int(args.height / 2))
+    canvas = torch.zeros((4, args.height, width))
+    glyphset.typeset(canvas, tokens, x=0, y=int(args.height / 2))
     torchvision.utils.save_image(canvas, args.output)
 
 
@@ -274,7 +290,12 @@ if __name__ == "__main__":
     )
     parser_typeset.add_argument("input", type=Path)
     parser_typeset.add_argument("text", type=str)
-    parser_typeset.add_argument("--width", type=int, help="Canvas width", default=1024)
+    parser_typeset.add_argument(
+        "--width",
+        type=int,
+        help="Canvas width, by default autodetermined",
+        default=None,
+    )
     parser_typeset.add_argument("--height", type=int, help="Canvas height", default=50)
     parser_typeset.add_argument(
         "-o",
