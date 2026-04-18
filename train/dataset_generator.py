@@ -4,6 +4,7 @@
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Union
 
@@ -128,12 +129,11 @@ def alpha_blend(fg, bg, alpha, blend_alpha=None):
         blend_alpha = 255 if blend_alpha is None else blend_alpha
 
         alpha_u16 = alpha.to(torch.int32)
-        alpha_u16 = (alpha_u16 * blend_alpha) / 255
+        alpha_u16 = (alpha_u16 * blend_alpha) // 255
 
         fg = fg.to(torch.int32)
         bg = bg.to(torch.int32)
-        blended = (fg * alpha_u16 + bg * (255 - alpha_u16)) / 255
-
+        blended = (fg * alpha_u16 + bg * (255 - alpha_u16)) // 255
         res = blended.to(dtype=torch.uint8)
         return res
     else:
@@ -243,6 +243,14 @@ class ImageLoader:
         with ThreadPoolExecutor() as executor:
             res = list(executor.map(load_img, to_load))
             return [img for _, img in sorted(res)]
+
+
+@dataclass
+class OverlayResult:
+    composite: Tensor
+    overlaid: Tensor | None
+    composite_x: tuple[int, int]
+    composite_y: tuple[int, int]
 
 
 class DatasetGenerator:
@@ -680,11 +688,21 @@ class TextSource(OverlaySource):
         width = self._glyphset.typeset_width(tokens)
         canvas_width = width + self._config.margin_left + self._config.margin_right
         canvas_height = self._config.canvas_height
-        canvas = torch.zeros((4, canvas_height, canvas_width))
+
+        background_color_rgba_u8 = self._config.background_color_rgba_u8
+        if background_color_rgba_u8 is None:
+            background_color_rgba_u8 = [0, 0, 0, 0]
+        # canvas = torch.zeros((4, canvas_height, canvas_width), dtype=torch.uint8)
+        color = torch.tensor(
+            background_color_rgba_u8,
+            dtype=torch.uint8,
+        ).view(4, 1, 1)
+        canvas = color.expand(4, canvas_height, canvas_width).clone()
+
         self._glyphset.typeset(
             canvas, tokens, x=self._config.margin_left, y=self._config.canvas_baseline
         )
-        return (canvas * 255.0).to(torch.uint8)
+        return canvas  # (canvas * 255.0).to(torch.uint8)
 
 
 class DataPostprocess(BaseModel):
@@ -900,6 +918,7 @@ class ImageApplicator:
     ) -> tuple[Tensor, Tensor | None]:
         canvas = canvas
         mask = None
+        placed = []
         for i in range(self._get_count(rng)):
             overlay = overlay_source.create(rng)
             o_height, o_width = overlay.shape[1:]
@@ -913,6 +932,9 @@ class ImageApplicator:
 
             o_x = self._determine_pos(rng, self._config.position_x, o_width, c_width)
             o_y = self._determine_pos(rng, self._config.position_y, o_height, c_height)
+
+            if not self._config.overlap:
+                print("Keep rerolling until we have a non overlapping number :(")
 
             c_x = int(c_width / 2)
             c_y = int(c_height / 2)

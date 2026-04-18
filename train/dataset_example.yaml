@@ -44,7 +44,7 @@ config:
                 functions:
                     - <<: *blur_cfg
                     - <<: *jpeg_cfg
-            ratio: 0.5
+            ratio: 0.0
         augment_flip_horizontal:
             function: flip_horizontal
             ratio: 0.5
@@ -76,8 +76,9 @@ config:
             position_x: { mean: 0.5, sigma: 0.1, by_self: false }
             position_y: { mean: 0.5, sigma: 0.1, by_self: false }
             count:
-                min: 1
-                max: 1
+                min: 2
+                max: 2
+            overlap: false
     image_groups:
         bg_LevelOne:
             dirs: [LevelOne]
@@ -103,7 +104,9 @@ config:
             glyph_set: example_glyphset
             canvas_height: 30
             canvas_baseline: 15
-            background_color_rgba_u8: [0, 0, 0, 255]
+            margin_left: 5
+            margin_right: 15
+            background_color_rgba_u8: [128, 0, 0, 128]
             text_lines:
                 - abb
                 - abc
