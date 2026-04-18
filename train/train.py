@@ -2,6 +2,7 @@
 #
 #
 # https://docs.pytorch.org/tutorials/beginner/introyt/trainingyt.html#the-training-loop
+import argparse
 import json
 import sys
 import time
@@ -38,13 +39,27 @@ class TrainConfig(BaseModel):
     manual_seed: int = 3
     model_seed: int = 4
     generation_seed: int = 42
+    epoch_stop: int = 100_000_000
 
 
-config_file = "dataset.priv.yaml"
-if len(sys.argv) > 1:
-    config_file = sys.argv[1]
+parser = argparse.ArgumentParser(prog="letter_support")
+parser.add_argument(
+    "-c",
+    dest="config_file",
+    help="The config file for training and data generation, default: %(default)s",
+    default="dataset.priv.yaml",
+)
+parser.add_argument(
+    "-l",
+    dest="load_checkpoint",
+    help="The checkpoint file to load.",
+    default=None,
+)
 
-with open(config_file) as f:
+args = parser.parse_args()
+
+
+with open(args.config_file) as f:
     d = yaml.safe_load(f)
 train_config = TrainConfig.model_validate(d.get("train_config", {}))
 device = lookup_device("auto")
@@ -58,7 +73,7 @@ torch.manual_seed(train_config.manual_seed)
 validation_set = []
 
 
-train_pipeline = DataPipeline(config_file=config_file, full_init=False)
+train_pipeline = DataPipeline(config_file=args.config_file, full_init=False)
 print(f"train_config: {train_config}")
 rng = np.random.default_rng(train_config.generation_seed)
 
@@ -103,14 +118,13 @@ dynamic_training_gen = DynamicGenerator(
 # Initializing in a separate cell so we can easily add more epochs to the same run
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 # writer = SummaryWriter("runs/fashion_trainer_{}".format(timestamp))
-epoch_number = 0
-
-EPOCHS = 10000
 
 best_vloss = 1_000_000.0
 torch.manual_seed(train_config.model_seed)
 model = Unet(channels_in=3, channels_out=2)
+
 model.to(device)
+
 
 # optimizer = torch.optim.SGD(model.parameters(), lr=0.0001, momentum=0.9)
 # optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
@@ -130,6 +144,15 @@ if train_config.multi_step_lr:
         milestones=train_config.multi_step_lr.milestones,
         gamma=train_config.multi_step_lr.gamma,
     )
+
+epoch_start = 0
+if args.load_checkpoint:
+    checkpoint = torch.load(args.load_checkpoint, weights_only=True)
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+    epoch_start = checkpoint["epoch"] + 1
 
 
 loss_fn = torch.nn.CrossEntropyLoss()
@@ -219,7 +242,7 @@ def train_one_epoch(epoch_index):
 stats = []
 save_model = True
 start_time = time.time()
-for epoch in range(EPOCHS):
+for epoch in range(epoch_start, train_config.epoch_stop):
     epoch_record = {}
     print("EPOCH {}:".format(epoch))
     epoch_record["epoch"] = epoch
@@ -314,7 +337,14 @@ for epoch in range(EPOCHS):
         best_vloss = avg_vloss
         # model_path = "/tmp/model_{}_{}".format(timestamp, epoch_number)
         model_path = epoch_dir / "model.pth"
-        torch.save(model.state_dict(), model_path)
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+            },
+            model_path,
+        )
         print(f"saved model to {model_path}")
 
     dump_stats(epoch_dir, stats)
