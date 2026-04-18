@@ -246,11 +246,28 @@ class ImageLoader:
 
 
 @dataclass
+class Rect:
+    x: tuple[int, int]
+    y: tuple[int, int]
+
+    def overlaps(self, other: "Rect") -> bool:
+        return (
+            self.x[0] < other.x[1]
+            and self.x[1] > other.x[0]
+            and self.y[0] < other.y[1]
+            and self.y[1] > other.y[0]
+        )
+
+
+@dataclass
 class OverlayResult:
     composite: Tensor
     overlaid: Tensor | None
     composite_x: tuple[int, int]
     composite_y: tuple[int, int]
+
+    def composite_rect(self) -> Rect:
+        return Rect(x=self.composite_x, y=self.composite_y)
 
 
 class DatasetGenerator:
@@ -381,7 +398,7 @@ class DatasetGenerator:
         f_y,
         return_overlay=False,
         dtype=torch.float,
-    ) -> Tensor:
+    ) -> OverlayResult:
         # We've selected the position in the canvas, and the position in the overlay.
         # next, we have to determine the rectangle in which the bounds overlap.
         # We will place the overlay coordinate onto the canvas coordinate.
@@ -416,6 +433,7 @@ class DatasetGenerator:
         fg_x1 = max(0, -x_offset)
         fg_x2 = fg_x1 + (x2 - x1)
 
+        mask = None
         if return_overlay:
             mask = torch.zeros(
                 background.shape,
@@ -424,14 +442,20 @@ class DatasetGenerator:
 
         # Handle two situations where the intersection is disjoint; ie; the overlay is outside of the bg.
         if y2 < y1 or x2 < x1:
-            if return_overlay:
-                return background, mask
-            return background
+            return OverlayResult(
+                composite=background,
+                overlaid=mask,
+                composite_x=(0, 0),
+                composite_y=(0, 0),
+            )
 
         if fg_y2 < fg_y1 or fg_x2 < fg_x1:
-            if return_overlay:
-                return background, mask
-            return background
+            return OverlayResult(
+                composite=background,
+                overlaid=mask,
+                composite_x=(0, 0),
+                composite_y=(0, 0),
+            )
 
         # Apply the overlay
         if foreground.shape[0] == 4:
@@ -447,9 +471,13 @@ class DatasetGenerator:
 
         if return_overlay:
             mask[:, y1:y2, x1:x2] = foreground[:, fg_y1:fg_y2, fg_x1:fg_x2]
-            return background, mask
 
-        return background
+        return OverlayResult(
+            composite=background,
+            overlaid=mask,
+            composite_x=(x1, x2),
+            composite_y=(y1, y2),
+        )
 
     @staticmethod
     def stamp_tile(
@@ -933,13 +961,52 @@ class ImageApplicator:
             o_x = self._determine_pos(rng, self._config.position_x, o_width, c_width)
             o_y = self._determine_pos(rng, self._config.position_y, o_height, c_height)
 
-            if not self._config.overlap:
-                print("Keep rerolling until we have a non overlapping number :(")
-
             c_x = int(c_width / 2)
             c_y = int(c_height / 2)
 
-            overlay_and_mask = DatasetGenerator.image_overlay(
+            if not self._config.overlap:
+                # Super ugly duplicated from image_overlay
+                def pos_overlapping(x, y):
+                    # Calculate the overlapping region
+                    bg_h, bg_w = c_height, c_width
+                    fg_h, fg_w = o_height, o_width
+
+                    b_x = int(c_x - bg_w / 2)
+                    b_y = int(c_y - bg_h / 2)
+                    f_x = int(x - bg_w / 2)
+                    f_y = int(y - bg_h / 2)
+
+                    # x_offset and y_offset is the top left corner of the overlay in bg coordinates.
+                    x_offset = int(b_x - f_x)
+                    y_offset = int(b_y - f_y)
+                    # Determine intersection coordinates (handles boundary crossing)
+                    y1 = max(0, y_offset)
+                    y2 = min(bg_h, y_offset + fg_h)
+                    x1 = max(0, x_offset)
+                    x2 = min(bg_w, x_offset + fg_w)
+                    new_rect = Rect(x=(x1, x2), y=(y1, y2))
+                    for o in placed:
+                        if o.overlaps(new_rect):
+                            return True
+
+                    return False
+
+                positioned = False
+                for _attempt in range(100):
+                    if pos_overlapping(o_x, o_y):
+                        o_x = self._determine_pos(
+                            rng, self._config.position_x, o_width, c_width
+                        )
+                        o_y = self._determine_pos(
+                            rng, self._config.position_y, o_height, c_height
+                        )
+                    else:
+                        positioned = True
+                        break
+                if not positioned:
+                    print("Failed to position because of overlap")
+
+            overlay_result = DatasetGenerator.image_overlay(
                 sub_canvas,
                 overlay,
                 c_x,
@@ -949,10 +1016,10 @@ class ImageApplicator:
                 return_overlay=return_mask,
                 dtype=torch.uint8,
             )
+
+            sub_canvas = overlay_result.composite
             if return_mask:
-                sub_canvas, mask = overlay_and_mask
-            else:
-                sub_canvas = overlay_and_mask
+                mask = overlay_result.overlaid
 
             blend_alpha = self._determine_blend_alpha(rng, self._config.blend_alpha)
             blend_alpha = int(blend_alpha * 255)
@@ -962,6 +1029,7 @@ class ImageApplicator:
             canvas = alpha_blend(
                 fg_rgb, canvas[:3, :, :], fg_alpha, blend_alpha=blend_alpha
             )
+            placed.append(overlay_result.composite_rect())
 
         for processor in self._post_process_image:
             canvas = processor.apply(rng, canvas)

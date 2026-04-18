@@ -76,8 +76,8 @@ config:
             position_x: { mean: 0.5, sigma: 0.1, by_self: false }
             position_y: { mean: 0.5, sigma: 0.1, by_self: false }
             count:
-                min: 2
-                max: 2
+                min: 4
+                max: 4
             overlap: false
     image_groups:
         bg_LevelOne:
