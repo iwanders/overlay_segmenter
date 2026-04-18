@@ -16,25 +16,44 @@ import yaml
 from pydantic import BaseModel
 from torch import Tensor
 
-from dataset_generator import load_image_file
+from dataset_generator import alpha_blend, load_image_file
 
 
 class GlyphSpec(BaseModel):
+    # Override the master baseline for this glyph (are you really sure!?)
+    # This is relative to the image obtained from cliping the font between ascender and descender!
+    # IE; it is the baseline value used for positiong the glyph
+    baseline: int | None = None
+    # Start, inclusive, value in gimp.
     start: int | None = None
-    # End, inclusive!
+    # End, inclusive, value in gimp.
     end: int | None = None
+    # String representation of this section.
     tokens: str
 
 
 class FontSpec(BaseModel):
+    # Image that holds the individual glyphs.
     image_path: Path
+    # Baseline behaves as the anchor of a line, it is the 'base' of all letters. Selection of baseline in gimp.
+    # https://en.wikipedia.org/wiki/Baseline_(typography)
     baseline: int
+    # The ascender is the highest pixel value of any character. Value is inclusive, as selected in gimp.
     ascender: int
+    # Descender is the lowest pixel value of any character. Value is inclusive, as selected in gimp.
     descender: int
     # Skip this many pixels from the left (such that we can put some annotation pixels)
     skip_left: int = 1
+    # This many transparent pixels between characters, to ensure we merge " and characters like that.
     inter_character_minimum: int = 1
+    # List of all individual glyphs, where individual values can be specified.
     glyphs: list[GlyphSpec]
+
+    # Width of a space character that delimites two words.
+    space_width: int
+
+    # Distance of whitespace between two letters
+    letter_spacing: int
 
 
 # This is this:
@@ -42,19 +61,33 @@ class FontSpec(BaseModel):
 #
 # But then... with Glyph prefixed to it because 'Sort' is too vague.
 class GlyphSort:
-    def __init__(self, tokens: str, img: Tensor, baseline: int):
-        self._tokens = tokens
+    def __init__(self, spec: GlyphSpec, img: Tensor):
+        self._spec = spec
+        if self._spec.baseline is None:
+            raise ValueError("At this point the baseline must be set!")
         self._img = img
-        self._baseline = baseline
 
     def image(self) -> Tensor:
         return self._img
 
     def tokens(self) -> str:
-        return self._tokens
+        return self._spec.tokens
 
     def filename_tokens(self) -> str:
-        return self._tokens.replace("/", "_slash_").replace('"', "_quote_")
+        return self._spec.tokens.replace("/", "_slash_").replace('"', "_quote_")
+
+    def typeset(self, canvas: Tensor, x: int, y: int):
+        print(f"Typesetting {self._spec.tokens} at x={x}, y={y}")
+        c, h, w = self._img.shape
+        b = self._spec.baseline
+        canvas_t = y - b
+        canvas_b = canvas_t + h
+        canvas_l = x
+        canvas_r = x + w
+        canvas[0:c, canvas_t:canvas_b, canvas_l:canvas_r] = self._img
+
+    def width(self) -> int:
+        return self._img.shape[2]
 
 
 class Glyphset:
@@ -64,6 +97,14 @@ class Glyphset:
         spec = FontSpec.model_validate(d)
         self._spec = spec
         self.create_glyphs()
+        self._glyph_sorts = {v.tokens(): v for v in self._glyphs}
+        self._glyph_sorts[" "] = GlyphSort(
+            GlyphSpec(
+                tokens=" ",
+                baseline=0,
+            ),
+            torch.zeros((4, 1, self._spec.space_width)),
+        )
 
     @staticmethod
     def find_first_nonzero(v: Tensor, start_index: int | None) -> int | None:
@@ -128,13 +169,32 @@ class Glyphset:
             if glyph_end is None:
                 raise ValueError("glyph glyph_end could not be determined")
             glyph_image = self._line[:, :, glyph_start:glyph_end]
-            self._glyphs.append(
-                GlyphSort(glyph_spec.tokens, glyph_image, baseline=self._spec.baseline)
-            )
+            if glyph_spec.baseline is None:
+                glyph_spec.baseline = self._spec.baseline - self._spec.ascender
+            self._glyphs.append(GlyphSort(glyph_spec, glyph_image))
             line_pos = glyph_end
 
     def glyphs(self) -> list[GlyphSort]:
         return self._glyphs
+
+    def typeset(self, canvas, tokens: list[str], x: int, y: int):
+        """
+        Typesets the list of tokens onto canvas, with baseline starting at pos.
+        """
+
+        xpos = x
+        previous_token = " "
+        for i, t in enumerate(tokens):
+            if t != " " and previous_token != " ":
+                xpos += self._spec.letter_spacing
+
+            glyph_set = self._glyph_sorts.get(t)
+            if t is None:
+                raise KeyError(f"missing glyph {t}")
+            glyph_set.typeset(canvas, x=xpos, y=y)
+            xpos += glyph_set.width()
+
+            previous_token = t
 
 
 def run_glyphset(args):
@@ -145,6 +205,9 @@ def run_glyphset(args):
         torchvision.utils.save_image(
             glyph.image(), f"/tmp/glyph_{i:0>3}_{glyph.filename_tokens()}.png"
         )
+    canvas = torch.zeros((4, 28, 100))
+    glyphset.typeset(canvas, ("pc ba"[:]), x=3, y=17)
+    torchvision.utils.save_image(canvas, "/tmp/typeset_pc_ba.png")
 
 
 if __name__ == "__main__":

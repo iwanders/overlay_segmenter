@@ -1,3 +1,5 @@
+# All coordinates are in gimp coordinates, with relevant pixels selected, see letter_support.py's struct spec for the
+# meaning of individual entries.
 image_path: "test_font.png"
 baseline: 17
 ascender: 5
@@ -13,3 +15,7 @@ glyphs:
       end: 91
     - tokens: "/"
     - tokens: "-"
+
+space_width: 10
+
+letter_spacing: 3
