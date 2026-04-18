@@ -136,8 +136,7 @@ class Glyphset:
         spec = FontSpec.model_validate(d)
         self._spec = spec
         self.create_glyphs()
-        self._glyph_sorts = {v.tokens(): v for v in self._glyphs}
-        self._glyph_sorts[" "] = GlyphSort(
+        space_glyph = GlyphSort(
             GlyphSpec(
                 tokens=" ",
                 baseline=1,
@@ -145,6 +144,8 @@ class Glyphset:
             ),
             torch.zeros((4, 1, self._spec.space_width), dtype=torch.uint8),
         )
+        self._glyphs.append(space_glyph)
+        self._glyph_sorts = {v.tokens(): v for v in self._glyphs}
 
     @staticmethod
     def find_first_nonzero(v: Tensor, start_index: int | None) -> int | None:

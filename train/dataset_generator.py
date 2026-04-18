@@ -672,6 +672,8 @@ class TextGenerationConfig(BaseModel):
     # Background color to use before drawing the text.
     background_color_rgba_u8: tuple[int, int, int, int] | None = None
 
+    skip_missing_characters: bool = True
+
 
 class OverlaySource(ABC):
     @abstractmethod
@@ -700,12 +702,32 @@ class TextSource(OverlaySource):
     ):
         self._config = config
         if isinstance(self._config.text_lines, Path):
-            text_line_path = config_file.parent / self._config.text_lines
+            text_line_path = Path(config_file).parent / self._config.text_lines
             if not text_line_path.is_file():
                 raise FileNotFoundError(f"Failed to open {text_line_path}")
             with open(text_line_path, "r") as f:
                 self._config.text_lines = f.read().splitlines()
         self._glyphset = glyphset
+
+        necessary_characters = set("".join(self._config.text_lines))
+        have_characters = set([a.tokens() for a in self._glyphset.glyphs()])
+        print(necessary_characters)
+        missing = necessary_characters - have_characters
+        if config.skip_missing_characters:
+
+            def remover(a: str) -> str:
+                for m in missing:
+                    a = a.replace(m, "")
+                return a
+
+            for i in range(len(self._config.text_lines)):
+                self._config.text_lines[i] = remover(self._config.text_lines[i])
+
+        else:
+            if missing:
+                raise ValueError(
+                    f"Missing characters, can't assemble all strings, necessary; {necessary_characters}, got {have_characters}, missing {missing}"
+                )
 
     def get_count(self) -> int:
         return len(self._config.text_lines)
@@ -1184,11 +1206,13 @@ class DataPipeline:
     def load_glyphsets(self):
         self._glyphsets = {}
         for name, input_group in self._data_config.glyphsets.items():
-            self._glyphsets[name] = Glyphset(input_group.config)
+            self._glyphsets[name] = Glyphset(self._substitute_path(input_group.config))
 
     def load_text_groups(self):
         self._text_groups = {}
         for name, input_group in self._data_config.text_groups.items():
+            if not isinstance(input_group.text_lines, list):
+                input_group.text_lines = self._substitute_path(input_group.text_lines)
             glyphset = self._glyphsets.get(input_group.glyph_set)
             if glyphset is None:
                 raise ValueError(f"Glyphset {input_group.glyph_set} not found")
@@ -1293,8 +1317,9 @@ class DataPipeline:
 def test_new_spec():
     import sys
 
-    # config_file = "dataset.priv.yaml"
     config_file = "dataset_example.yaml"
+    if len(sys.argv) > 1:
+        config_file = sys.argv[1]
     z = DataPipeline(config_file)
     print(z)
     rng = np.random.default_rng(3)

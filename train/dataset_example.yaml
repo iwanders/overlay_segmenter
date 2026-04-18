@@ -107,6 +107,8 @@ config:
             margin_left: 5
             margin_right: 15
             background_color_rgba_u8: [128, 0, 0, 128]
+            skip_missing_characters: false
+            #text_lines: "strings.txt"
             text_lines:
                 - abb
                 - abc
