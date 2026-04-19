@@ -36,3 +36,13 @@ def lookup_device(input_str) -> torch.device:
         return preferred_device
 
     return input_str
+
+
+def lookup_dtype(dtype: torch.dtype | str) -> torch.dtype:
+    if isinstance(dtype, torch.dtype):
+        return dtype
+    else:
+        found_dtype = getattr(torch, dtype)
+        if not isinstance(found_dtype, torch.dtype):
+            raise KeyError(f"  {dtype} is not a dtype")
+        return found_dtype

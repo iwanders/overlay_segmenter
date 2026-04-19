@@ -13,6 +13,7 @@ from torch import Tensor
 
 from dataset_generator import load_image_file
 from model import Unet
+from util import lookup_dtype
 
 if torch.cuda.is_available():
     print(f"GPU: {torch.cuda.get_device_name(0)} is available.")
@@ -225,6 +226,28 @@ def run_test(args):
     torchvision.utils.save_image(merged, "/tmp/merged.png", normalize=True)
 
 
+def center_inference(model: Unet, image: Tensor, device=best_device):
+
+    image_dimensions = (image.shape[1], image.shape[2])
+    image = image[0:3, 64 : (896 + 64), 128:1792].unsqueeze(0)
+    with torch.no_grad():
+        masked = model(image)
+    original_image_size = (2, image_dimensions[0], image_dimensions[1])
+    mask_image = torch.zeros(
+        original_image_size,
+        dtype=torch.float,
+        device=device,
+    )
+
+    mask_image[
+        0:2,
+        64 : (896 + 64),
+        128:1792,
+    ] = masked
+
+    return mask_image
+
+
 def tiled_inference(
     model: Unet, image: Tensor, tile_size=256, device=best_device
 ) -> Tensor:
@@ -315,10 +338,31 @@ def batched_inference(model: Unet, tiles: Tensor, batch_size=10) -> Tensor:
     return output_data
 
 
+def run_convert16(args):
+    checkpoint = torch.load(args.checkpoint, weights_only=True)
+    model = Unet(channels_in=3, channels_out=2)
+
+    checkpoint = torch.load(args.checkpoint, weights_only=True)
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+    dtype = lookup_dtype(args.dtype)
+    model.to(dtype=dtype)
+    to_store = {
+        "model_state_dict": model.state_dict(),
+        "stats": checkpoint["stats"],
+        "loaded_config": checkpoint["loaded_config"],
+        "elapsed_time": checkpoint["elapsed_time"],
+    }
+    save_path = args.output / "model.pth"
+    torch.save(to_store, save_path)
+    print(f"Saved to {save_path}")
+
+
 def run_inference(args):
     model = load_model(args.checkpoint)
-    if args.float16:
-        model = model.to(torch.float16)
+
+    dtype = lookup_dtype(args.dtype)
+    model = model.to(dtype)
     out_dir = args.output
 
     suffix = args.suffix
@@ -333,17 +377,18 @@ def run_inference(args):
         ):
             print(f"Ignoring {f} because it looks like our output")
             continue
-        s = time.time()
         image = load_image_file(f, device=best_device)
         if image.shape[0] == 4:
             image = image[0:3, :, :]
 
-        if args.float16:
-            image = image.to(torch.float16)
+        image = image.to(dtype)
         time_start = time.time()
         if True:
             # This one takes 0.003677845001220703 for subsequent calls.
-            masked = tiled_inference(model, image, device=best_device, tile_size=960)
+            # masked = tiled_inference(model, image, device=best_device, tile_size=960)
+            # And this one takes 0.0008969306945800781
+            # but takes a lot of vram lol.
+            masked = center_inference(model, image, device=best_device)
         else:
             # This one takes 0.57 for subsequent calls O_o
             cutter = TileCutter(image.shape[1:], overlap=16)
@@ -372,10 +417,28 @@ if __name__ == "__main__":
     parser_inference = subparsers.add_parser("inference", help="Run inference")
     parser_inference.add_argument("-c", "--checkpoint", type=Path, required=True)
     parser_inference.add_argument("--output", type=Path, default=Path("/tmp/"))
-    parser_inference.add_argument("--float16", default=False, action="store_true")
     parser_inference.add_argument("--suffix", type=str, default="")
     parser_inference.add_argument("input", type=Path, nargs="+")
+    parser_inference.add_argument(
+        "-t",
+        "--dtype",
+        type=str,
+        default="float16",
+        help="Dtype to use, like float16 or float, default %(default)s",
+    )
     parser_inference.set_defaults(func=run_inference)
+
+    parser_convert16 = subparsers.add_parser("convert", help="Run inference")
+    parser_convert16.add_argument("-c", "--checkpoint", type=Path, required=True)
+    parser_convert16.add_argument(
+        "-t",
+        "--dtype",
+        type=str,
+        default="float16",
+        help="Dtype to use, like float16 or float8_e4m3fn, default %(default)s",
+    )
+    parser_convert16.add_argument("--output", type=Path, default=Path("/tmp/"))
+    parser_convert16.set_defaults(func=run_convert16)
 
     parser_test = subparsers.add_parser("test", help="Run inference")
     parser_test.set_defaults(func=run_test)
