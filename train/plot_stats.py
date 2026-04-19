@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 import json
 import sys
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 if __name__ == "__main__":
-    with open(sys.argv[1]) as f:
+    stats_path = Path(sys.argv[1])
+    with open(stats_path) as f:
         d = json.load(f)
 
     epoch = [x["epoch"] for x in d]
@@ -74,4 +76,4 @@ if __name__ == "__main__":
     secax.set_xlabel("train time [s]")
     plt.legend()  # Displays the labels
     # plt.show()
-    plt.savefig("/tmp/stats.svg")
+    plt.savefig(stats_path.with_name("stats.svg"))

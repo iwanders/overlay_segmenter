@@ -1198,7 +1198,7 @@ class DataPipeline:
             with open(config_file) as f:
                 d = yaml.safe_load(f)
             self._data_config = DataConfig.model_validate(d["data_config"])
-            print(self._data_config)
+            # print(self._data_config)
             self._device = lookup_device(self._data_config.process_device)
             self.load_input_groups()
 
@@ -1252,7 +1252,7 @@ class DataPipeline:
     def print_inputs(self):
         for name, images in self._input_groups.items():
             print(
-                f"Inputs: {name} has {len(images)} images with {images[0].shape} size on {images[0].device}"
+                f"Inputs: {name} has {len(images)} images with {images[0].shape} in {images[0].dtype} size on {images[0].device}"
             )
 
     def load_input_groups(self):

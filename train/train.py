@@ -74,12 +74,12 @@ torch.backends.cudnn.benchmark = False
 torch.manual_seed(train_config.manual_seed)
 
 
-# training_set = []
 validation_set = []
 
 
 train_pipeline = DataPipeline(config_file=args.config_file, full_init=False)
 print(f"train_config: {train_config}")
+train_pipeline.print_inputs()
 rng = np.random.default_rng(train_config.generation_seed)
 
 validation_pipeline = train_pipeline.split_validation(
@@ -100,7 +100,6 @@ if True:
         torchvision.utils.save_image([img, torch.stack([mask, mask, mask])], out_path)
 
 
-resolution = tuple(validation_set[0][0].shape)
 # Larger batches (no change to learning rate) is not actually better?
 batch_size = train_config.batch_size
 
@@ -253,19 +252,19 @@ def train_one_epoch(epoch_index):
 
 
 def determine_save_dir_name(epoch: int):
-    if epoch < 10:
-        return f"{epoch:0>4}/"
+    # if epoch < 10:
+    #    return f"{epoch:0>4}/"
     # 10
-    if epoch < 100 and epoch % 10 == 0:
+    if epoch < 100 and epoch % 5 == 0:
         return f"{epoch:0>4}/"
     # 20
-    if epoch < 1000 and epoch % 100 == 0:
-        return f"{epoch:0>4}/"
-    # 30
-    if epoch < 10000 and epoch % 1000 == 0:
+    if epoch < 1000 and epoch % 50 == 0:
         return f"{epoch:0>4}/"
     # 40
-    # 41 * checkpoint size
+    if epoch < 10000 and epoch % 100 == 0:
+        return f"{epoch:0>4}/"
+    # 50
+    # 51 * checkpoint size
     return "latest"
 
 

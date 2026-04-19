@@ -363,13 +363,15 @@ def run_inference(args):
 
     dtype = lookup_dtype(args.dtype)
     model = model.to(dtype)
-    out_dir = args.output
 
     suffix = args.suffix
     if suffix:
         suffix = "_" + suffix
 
     for f in args.input:
+        out_dir = args.output
+        if out_dir is None:
+            out_dir = f.parent
         if (
             f"_mask{suffix}.png" in str(f)
             or f"_values{suffix}.png" in str(f)
@@ -416,7 +418,12 @@ if __name__ == "__main__":
 
     parser_inference = subparsers.add_parser("inference", help="Run inference")
     parser_inference.add_argument("-c", "--checkpoint", type=Path, required=True)
-    parser_inference.add_argument("--output", type=Path, default=Path("/tmp/"))
+    parser_inference.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="output directory, defaults to input dir",
+    )
     parser_inference.add_argument("--suffix", type=str, default="")
     parser_inference.add_argument("input", type=Path, nargs="+")
     parser_inference.add_argument(
