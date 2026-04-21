@@ -40,6 +40,11 @@ data_config:
                 min: 50
                 max: 100
             ratio: 0.0
+        resize_roundtrip: &resize_config
+            function: resize_roundtrip
+            config:
+                factors: [2, 4]
+            ratio: 0.2
         fine_blur_jpg:
             function: combined
             config:
@@ -157,6 +162,7 @@ data_config:
           mask_layer: 1
           mask_alpha: 0.5
           post_process:
+              - resize_roundtrip
               - fine_blur
               - jpeg
               - fine_blur_jpg

@@ -255,12 +255,12 @@ def determine_save_dir_name(epoch: int):
     # if epoch < 10:
     #    return f"{epoch:0>4}/"
     # 10
-    if epoch < 100 and epoch % 5 == 0:
+    if epoch < 100 and epoch % 20 == 0:
         return f"{epoch:0>4}/"
-    # 20
+    # 5
     if epoch < 1000 and epoch % 50 == 0:
         return f"{epoch:0>4}/"
-    # 40
+    # 25
     if epoch < 10000 and epoch % 100 == 0:
         return f"{epoch:0>4}/"
     # 50

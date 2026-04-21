@@ -812,6 +812,11 @@ class PostProcess:
                     postprocess_config.config,
                     ratio=postprocess_config.ratio,
                 )
+            case "resize_roundtrip":
+                return PostprocessResizeRoundtrip(
+                    postprocess_config.config,
+                    ratio=postprocess_config.ratio,
+                )
             case _ as missing:
                 raise NotImplementedError(f"Not implemented postprocess: {missing}")
 
@@ -881,6 +886,27 @@ class PostprocessCombined(PostProcess):
             res = f.apply(rng, res)
 
         return res.to(tensor.device)
+
+
+class PostprocessResizeRoundtrip(PostProcess):
+    def __init__(self, config, ratio):
+        super().__init__(ratio)
+        self._factors = config["factors"]
+
+    def apply(self, rng: np.random.Generator, tensor: Tensor) -> Tensor:
+        if not self.should_apply(rng):
+            return tensor
+        factor = rng_choice(rng, self._factors)
+        current_resolution = tensor.shape[1:]
+        small_resolution = (
+            int(tensor.shape[1] / factor),
+            int(tensor.shape[2] / factor),
+        )
+        downscaled = torchvision.transforms.functional.resize(tensor, small_resolution)
+        upscaled = torchvision.transforms.functional.resize(
+            downscaled, current_resolution
+        )
+        return upscaled
 
 
 class PostprocessHsvTransform(PostProcess):
