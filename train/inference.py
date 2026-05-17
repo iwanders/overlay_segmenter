@@ -23,10 +23,16 @@ else:
     best_device = torch.device("cpu")
 
 
-def load_model(path: Path, device=best_device) -> Unet:
+def load_model(path: Path, device=best_device, print_state_dict=False) -> Unet:
     model = Unet(channels_in=3, channels_out=2)
 
     checkpoint = torch.load(path, weights_only=True)
+    if print_state_dict:
+        for k, v in checkpoint["model_state_dict"].items():
+            if isinstance(v, Tensor):
+                print(f"{k: <30} tensor: {v.shape}")
+            else:
+                print(f"{k: <30} : {v}")
 
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device)
