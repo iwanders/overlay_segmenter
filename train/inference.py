@@ -359,9 +359,15 @@ def run_convert16(args):
         "loaded_config": checkpoint["loaded_config"],
         "elapsed_time": checkpoint["elapsed_time"],
     }
-    save_path = args.output / "model.pth"
-    torch.save(to_store, save_path)
-    print(f"Saved to {save_path}")
+    if args.output.suffix == ".pth": 
+        torch.save(to_store, args.output)
+        print(f"Saved to {args.output}")
+    elif args.output.suffix == ".safetensors":
+        from safetensors.torch import save_file
+        save_file(model.state_dict(), args.output)
+    else:
+        raise ValueError(f"Unhandled suffix {args.output.suffix}")
+
 
 
 def run_inference(args):
@@ -441,7 +447,7 @@ if __name__ == "__main__":
     )
     parser_inference.set_defaults(func=run_inference)
 
-    parser_convert16 = subparsers.add_parser("convert", help="Run inference")
+    parser_convert16 = subparsers.add_parser("convert", help="Convert checkpoint")
     parser_convert16.add_argument("-c", "--checkpoint", type=Path, required=True)
     parser_convert16.add_argument(
         "-t",
@@ -450,7 +456,7 @@ if __name__ == "__main__":
         default="float16",
         help="Dtype to use, like float16 or float8_e4m3fn, default %(default)s",
     )
-    parser_convert16.add_argument("--output", type=Path, default=Path("/tmp/"))
+    parser_convert16.add_argument("--output", type=Path, default=Path("/tmp/model.pth"))
     parser_convert16.set_defaults(func=run_convert16)
 
     parser_test = subparsers.add_parser("test", help="Run inference")
