@@ -3,13 +3,18 @@ name = "overlay_segmenter"
 version = "0.1.0"
 edition = "2024"
 
+# Single source of truth; https://users.rust-lang.org/t/how-to-specify-a-dev-dependency-with-the-same-version-as-the-matching-dependency/89934/4
+[workspace.dependencies]
+flash_powder = { git = "https://github.com/iwanders/flash_powder.git", version = "0.1.0", features = ["cuda", "v2_13"] }
+#flash_powder = { path="../../../torch_stable_rs/repo/flash_powder", features = ["cuda", "v2_13"] }
+
 [dependencies]
 
 anyhow = "1.0.102"
 
 safetensors = "0.7.0"
 image = {version="0.25.10", features=["jpeg"]}
-flash_powder = { git = "https://github.com/iwanders/flash_powder.git", version = "0.1.0", features = ["cuda", "v2_13"] }
+flash_powder = {workspace=true}
 
 [build-dependencies]
-flash_powder = { git = "https://github.com/iwanders/flash_powder.git", version = "0.1.0" }
+flash_powder = {workspace=true}

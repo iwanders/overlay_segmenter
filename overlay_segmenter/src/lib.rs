@@ -277,7 +277,7 @@ fn image_to_float_tensor(
         dtype: Some(fp::DType::F32),
         ..Default::default()
     })?;
-    let divisor: Tensor = (255.0,).try_into()?;
+    let divisor: Tensor = 255.0.try_into()?;
     let img_tensor_ready = img_float.div(&divisor)?;
 
     let w = img_tensor_ready.shape()[1];
@@ -308,7 +308,7 @@ fn tensor_to_image(ten: &Ten<'_>) -> Result<image::DynamicImage, anyhow::Error> 
     if ten.size(0) == 1 {
         // Greyscale image.
         if ten.dtype() == fp::DType::F16 {
-            let t255: Tensor = (255.0,).try_into()?;
+            let t255: Tensor = 255.0.try_into()?;
             let t255: Tensor = t255.to(&fp::DType::F16.into())?;
             t = t.mul(&t255)?;
             t = t.to(&fp::DType::U8.into())?;
@@ -401,7 +401,7 @@ pub fn main() -> Result<(), anyhow::Error> {
             .i_mut((.., 64..(896 + 64), 128..1792))?
             .copy_(&r.squeeze()?)?;
 
-        let t255: Tensor = (255,).try_into()?;
+        let t255: Tensor = 255.try_into()?;
         let max = mask_image
             .squeeze()?
             .argmax(Some(0), Some(true))?
