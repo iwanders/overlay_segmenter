@@ -119,9 +119,7 @@ impl nn::Module for UNet {
     // https://github.com/pytorch/vision/blob/499ca5103b5c6abdf1973651d6eb3db9dfecdfbd/torchvision/models/vgg.py#L65
     fn forward(&self, input: &Ten<'_>) -> Result<Tensor, anyhow::Error> {
         let encoded_level_1 = self.encoder_conv_1.forward(input)?;
-        println!("encoded_level_1: {:?}", encoded_level_1.shape());
         let input_encode_level_2 = self.maxpool2x2.forward(&encoded_level_1.ten()?)?;
-        println!("input_encode_level_2: {:?}", input_encode_level_2.shape());
 
         let encoded_level_2 = self.encoder_conv_2.forward(&input_encode_level_2.ten()?)?;
         let input_encode_level_3 = self.maxpool2x2.forward(&encoded_level_2.ten()?)?;
@@ -133,17 +131,11 @@ impl nn::Module for UNet {
 
         let input_bottleneck = self.maxpool2x2.forward(&encoded_level_4.ten()?)?;
         let output_bottleneck = self.bottleneck.forward(&input_bottleneck.ten()?)?;
-        println!("output_bottleneck shape: {:?}", output_bottleneck.shape());
 
         // Now the decoder, here we concatenate with the skip levels.
         let upsample_for_decode_level_4 =
             self.decoder_up_level4.forward(&output_bottleneck.ten()?)?;
 
-        println!(
-            "upsample_for_decode_level_4 shape: {:?}",
-            upsample_for_decode_level_4.shape()
-        );
-        println!("encoded_level_4 shape: {:?}", encoded_level_4.shape());
         let input_decode_level_4 =
             Tensor::cat(&[&upsample_for_decode_level_4, &encoded_level_4], 1)?;
         let decoded_level_4 = self.decoder_conv_4.forward(&input_decode_level_4.ten()?)?;
@@ -306,8 +298,6 @@ fn tensor_to_image(ten: &Ten<'_>) -> Result<image::DynamicImage, anyhow::Error> 
 
     let mut t = ten.to_owned()?;
     t = t.to(&fp::DType::F32.into())?;
-    println!("t: {:?}", t);
-
     if ten.dim() != 3 {
         bail!("Expected tensor of dimension 3")
     }
@@ -327,6 +317,15 @@ fn tensor_to_image(ten: &Ten<'_>) -> Result<image::DynamicImage, anyhow::Error> 
             let img = image::GrayImage::from_raw(width as u32, height as u32, raw_pixels)
                 .expect("Container is not the right size for width and height");
             return Ok(image::DynamicImage::ImageLuma8(img));
+        } else if ten.dtype() == fp::DType::I64 {
+            t = t.to(&fp::DType::U8.into())?;
+            let mut raw_pixels: Vec<u8> = vec![0; (width * height * 1) as usize];
+            raw_pixels.copy_from_slice(t.u8s_ref()?);
+            let img = image::GrayImage::from_raw(width as u32, height as u32, raw_pixels)
+                .expect("Container is not the right size for width and height");
+            return Ok(image::DynamicImage::ImageLuma8(img));
+        } else {
+            todo!("data type {:?} is not implemented yet", ten.dtype());
         }
     }
 
@@ -393,12 +392,9 @@ pub fn main() -> Result<(), anyhow::Error> {
                 device: Some(fp::Device::CPU),
                 ..Default::default()
             })?;
-        println!("r shape: {:?}", r.shape());
-        let r = r.ten()?.select(0, 0)?;
-        println!("r shape: {:?}", r.shape());
-        let r = r.ten()?.select(0, 1)?.unsqueeze(0)?.to_owned()?;
-        // if r: [2, 896, 1664], why doesn't r.i((0, .., ..)) make that [1, 896, 1664]?
-        let img = tensor_to_image(&r.ten()?)?;
+        let t255: Tensor = (255,).try_into()?;
+        let max = r.squeeze()?.argmax(Some(0), Some(true))?.mul(&t255)?;
+        let img = tensor_to_image(&max.ten()?)?;
 
         img.save("/tmp/first_light.png")?;
     }

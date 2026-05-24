@@ -237,6 +237,7 @@ def center_inference(model: Unet, image: Tensor, device=best_device):
     image = image[0:3, 64 : (896 + 64), 128:1792].unsqueeze(0)
     with torch.no_grad():
         masked = model(image)
+    print(masked)
     original_image_size = (2, image_dimensions[0], image_dimensions[1])
     mask_image = torch.zeros(
         original_image_size,
