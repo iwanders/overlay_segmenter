@@ -327,9 +327,9 @@ fn tensor_to_image(ten: &Ten<'_>) -> Result<image::DynamicImage, anyhow::Error> 
         } else {
             todo!("data type {:?} is not implemented yet", ten.dtype());
         }
+    } else {
+        todo!("image with more than one channel are not yet handled")
     }
-
-    todo!()
 }
 
 pub fn main() -> Result<(), anyhow::Error> {
@@ -392,8 +392,20 @@ pub fn main() -> Result<(), anyhow::Error> {
                 device: Some(fp::Device::CPU),
                 ..Default::default()
             })?;
+
+        let mut mask_image = Tensor::zeros(
+            &[2, img.height() as usize, img.width() as usize],
+            &Default::default(),
+        )?;
+        mask_image
+            .i_mut((.., 64..(896 + 64), 128..1792))?
+            .copy_(&r.squeeze()?)?;
+
         let t255: Tensor = (255,).try_into()?;
-        let max = r.squeeze()?.argmax(Some(0), Some(true))?.mul(&t255)?;
+        let max = mask_image
+            .squeeze()?
+            .argmax(Some(0), Some(true))?
+            .mul(&t255)?;
         let img = tensor_to_image(&max.ten()?)?;
 
         img.save("/tmp/first_light.png")?;
