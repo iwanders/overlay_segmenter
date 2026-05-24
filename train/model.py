@@ -110,6 +110,7 @@ class Unet(nn.Module):
     def forward(self, x):
         # First encoder
         encoded_level_1 = self.encoder_conv_1(x)
+
         input_encode_level_2 = self.maxpool2x2(encoded_level_1)
 
         encoded_level_2 = self.encoder_conv_2(input_encode_level_2)

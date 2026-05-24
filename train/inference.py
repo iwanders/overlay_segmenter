@@ -9,10 +9,9 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 import torchvision
-from torch import Tensor
-
 from dataset_generator import load_image_file
 from model import Unet
+from torch import Tensor
 from util import lookup_dtype
 
 if torch.cuda.is_available():
@@ -359,15 +358,15 @@ def run_convert16(args):
         "loaded_config": checkpoint["loaded_config"],
         "elapsed_time": checkpoint["elapsed_time"],
     }
-    if args.output.suffix == ".pth": 
+    if args.output.suffix == ".pth":
         torch.save(to_store, args.output)
         print(f"Saved to {args.output}")
     elif args.output.suffix == ".safetensors":
         from safetensors.torch import save_file
+
         save_file(model.state_dict(), args.output)
     else:
         raise ValueError(f"Unhandled suffix {args.output.suffix}")
-
 
 
 def run_inference(args):
