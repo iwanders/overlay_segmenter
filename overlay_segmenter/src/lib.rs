@@ -79,23 +79,36 @@ impl UNet {
             ..Default::default()
         };
 
-        let decoder_up_level4 =
-            nn::ConvTranspose2d::new(1024, 1024, (2, 2), conv_transpose2d_options)?.into_boxed();
+        let decoder_up_level4 = if options.use_upconv {
+            nn::ConvTranspose2d::new(1024, 1024, (2, 2), conv_transpose2d_options)?.into_boxed()
+        } else {
+            todo!("upsample flavour not yet supported")
+        };
         let decoder_conv_4 = conv_block(512 + 1024, 512)?;
 
-        let decoder_up_level3 =
-            nn::ConvTranspose2d::new(512, 512, (2, 2), conv_transpose2d_options)?.into_boxed();
+        let decoder_up_level3 = if options.use_upconv {
+            nn::ConvTranspose2d::new(512, 512, (2, 2), conv_transpose2d_options)?.into_boxed()
+        } else {
+            todo!("upsample flavour not yet supported")
+        };
         let decoder_conv_3 = conv_block(256 + 512, 256)?;
 
-        let decoder_up_level2 =
-            nn::ConvTranspose2d::new(256, 256, (2, 2), conv_transpose2d_options)?.into_boxed();
+        let decoder_up_level2 = if options.use_upconv {
+            nn::ConvTranspose2d::new(256, 256, (2, 2), conv_transpose2d_options)?.into_boxed()
+        } else {
+            todo!("upsample flavour not yet supported")
+        };
         let decoder_conv_2 = conv_block(128 + 256, 128)?;
 
-        let decoder_up_level1 =
-            nn::ConvTranspose2d::new(128, 128, (2, 2), conv_transpose2d_options)?.into_boxed();
+        let decoder_up_level1 = if options.use_upconv {
+            nn::ConvTranspose2d::new(128, 128, (2, 2), conv_transpose2d_options)?.into_boxed()
+        } else {
+            todo!("upsample flavour not yet supported")
+        };
         let decoder_conv_1 = conv_block(64 + 128, 64)?;
 
         let last_conv = nn::Conv2d::new(64, options.channels_out, (1, 1), Default::default())?;
+
         Ok(UNet {
             maxpool2x2,
             encoder_conv_1,
@@ -116,7 +129,6 @@ impl UNet {
     }
 }
 impl nn::Module for UNet {
-    // https://github.com/pytorch/vision/blob/499ca5103b5c6abdf1973651d6eb3db9dfecdfbd/torchvision/models/vgg.py#L65
     fn forward(&self, input: &Ten<'_>) -> Result<Tensor, anyhow::Error> {
         let encoded_level_1 = self.encoder_conv_1.forward(input)?;
         let input_encode_level_2 = self.maxpool2x2.forward(&encoded_level_1.ten()?)?;
@@ -146,12 +158,14 @@ impl nn::Module for UNet {
         let input_decode_level_3 =
             Tensor::cat(&[&upsample_for_decode_level_3, &encoded_level_3], 1)?;
         let decoded_level_3 = self.decoder_conv_3.forward(&input_decode_level_3.ten()?)?;
+
         // And then we repeat that...
         let upsample_for_decode_level_2 =
             self.decoder_up_level2.forward(&decoded_level_3.ten()?)?;
         let input_decode_level_2 =
             Tensor::cat(&[&upsample_for_decode_level_2, &encoded_level_2], 1)?;
         let decoded_level_2 = self.decoder_conv_2.forward(&input_decode_level_2.ten()?)?;
+
         // And then we repeat that...
         let upsample_for_decode_level_1 =
             self.decoder_up_level1.forward(&decoded_level_2.ten()?)?;
