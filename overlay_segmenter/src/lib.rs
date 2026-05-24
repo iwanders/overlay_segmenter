@@ -294,11 +294,7 @@ fn image_to_float_tensor(
     let divisor: Tensor = 255.0.try_into()?;
     let img_tensor_ready = img_float.div(&divisor)?;
 
-    let w = img_tensor_ready.shape()[1];
-    let h = img_tensor_ready.shape()[0];
-
     let channels_stacked = img_tensor_ready.permute(&[2, 0, 1])?;
-    // let with_batch = channels_stacked.view(&[1, 3, h, w])?.to_owned()?;
     if use_cuda {
         Ok(channels_stacked.to(&fp::Device::CUDA.into())?)
     } else {
@@ -326,18 +322,18 @@ fn tensor_to_image(ten: &Ten<'_>) -> Result<image::DynamicImage, anyhow::Error> 
             let t255: Tensor = t255.to(&fp::DType::F16.into())?;
             t = t.mul(&t255)?;
             t = t.to(&fp::DType::U8.into())?;
-            let mut raw_pixels: Vec<u8> = vec![0; (width * height * 1) as usize];
+            let mut raw_pixels: Vec<u8> = vec![0; width * height];
             raw_pixels.copy_from_slice(t.u8s_ref()?);
             let img = image::GrayImage::from_raw(width as u32, height as u32, raw_pixels)
                 .expect("Container is not the right size for width and height");
-            return Ok(image::DynamicImage::ImageLuma8(img));
+            Ok(image::DynamicImage::ImageLuma8(img))
         } else if ten.dtype() == fp::DType::I64 {
             t = t.to(&fp::DType::U8.into())?;
-            let mut raw_pixels: Vec<u8> = vec![0; (width * height * 1) as usize];
+            let mut raw_pixels: Vec<u8> = vec![0; width * height];
             raw_pixels.copy_from_slice(t.u8s_ref()?);
             let img = image::GrayImage::from_raw(width as u32, height as u32, raw_pixels)
                 .expect("Container is not the right size for width and height");
-            return Ok(image::DynamicImage::ImageLuma8(img));
+            Ok(image::DynamicImage::ImageLuma8(img))
         } else {
             todo!("data type {:?} is not implemented yet", ten.dtype());
         }
@@ -360,9 +356,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     let weights = PathBuf::from(safetensors_path);
     if !weights.is_file() {
         eprintln!(
-            "Run this binary from the 'example_vgg' directory, it looks for  \
-            {}, if that doesn't exist:\n Download it from https://download.pytorch.org/models/vgg11-8a719046.pth,\
-            convert it to safetensors with ./convert_pth.py",
+            "Missing {:?}, path should be to safetensors file.",
             weights.display()
         );
         bail!("missing necessary file, bailing out")
@@ -373,12 +367,12 @@ pub fn main() -> Result<(), anyhow::Error> {
     let tensors = SafeTensors::deserialize(&data)?;
     let our_safetensor = OurSafeTensors { st: &tensors };
 
-    // Instantiate vgg network and load its weights.
+    // Instantiate the network and load its weights.
     let mut unet = UNet::new(&UNetOptions::default())?;
 
     if false {
         let dummy_image = Tensor::zeros(&[1, 3, 256, 256], &Default::default())?;
-        let r = unet.forward(&dummy_image.ten()?)?;
+        let _r = unet.forward(&dummy_image.ten()?)?;
     }
 
     unet.load_state_dict(&our_safetensor)?;
@@ -395,10 +389,8 @@ pub fn main() -> Result<(), anyhow::Error> {
         let img = image::ImageReader::open(&argument)?.decode()?;
         let channels_stacked = image_to_float_tensor(&img, use_cuda)?;
         let channels_stacked = channels_stacked.to(&fp::DType::F16.into())?;
-        println!("channels_stacked shape: {:?}", channels_stacked.shape());
         let indexed = channels_stacked.i((.., 64..(896 + 64), 128..1792))?;
         let image = indexed.unsqueeze(0)?;
-        println!("image shape: {:?}", image.shape());
 
         let r = unet
             .forward(&image.ten()?)?
@@ -416,10 +408,8 @@ pub fn main() -> Result<(), anyhow::Error> {
             .copy_(&r.squeeze()?)?;
 
         let t255: Tensor = 255.try_into()?;
-        let max = mask_image
-            .squeeze()?
-            .argmax(Some(0), Some(true))?
-            .mul(&t255)?;
+        let max = mask_image.argmax(Some(0), Some(true))?.mul(&t255)?;
+
         let img = tensor_to_image(&max.ten()?)?;
 
         img.save("/tmp/first_light.png")?;
