@@ -398,6 +398,7 @@ pub fn main() -> Result<(), anyhow::Error> {
                 device: Some(fp::Device::CPU),
                 ..Default::default()
             })?;
+        println!("r: \n{:?}", r.to(&fp::DType::F32.into()).unwrap());
 
         let mut mask_image = Tensor::zeros(
             &[2, img.height() as usize, img.width() as usize],
