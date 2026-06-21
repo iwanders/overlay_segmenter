@@ -392,14 +392,12 @@ pub fn main() -> Result<(), anyhow::Error> {
         let indexed = channels_stacked.i((.., 64..(896 + 64), 128..1792))?;
         let image = indexed.unsqueeze(0)?;
 
-        let r = unet
-            .forward(&image.ten()?)?
-            .to(&flash_powder::factory::ToOptions {
-                device: Some(fp::Device::CPU),
-                ..Default::default()
-            })?;
+        let r = unet.forward(&image.ten()?)?;
         println!("r: \n{:?}", r);
-
+        let r = r.to(&flash_powder::factory::ToOptions {
+            device: Some(fp::Device::CPU),
+            ..Default::default()
+        })?;
         let mut mask_image = Tensor::zeros(
             &[2, img.height() as usize, img.width() as usize],
             &Default::default(),
