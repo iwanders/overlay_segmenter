@@ -389,9 +389,11 @@ pub fn main() -> Result<(), anyhow::Error> {
         let img = image::ImageReader::open(&argument)?.decode()?;
         let channels_stacked = image_to_float_tensor(&img, use_cuda)?;
         let channels_stacked = channels_stacked.to(&fp::DType::F16.into())?;
-        let indexed = channels_stacked.i((.., 64..(896 + 64), 128..1792))?;
+        let dimension = (.., 64..(896 + 64), 128..1792); // 1664x832
+        let indexed = channels_stacked.i(dimension.clone())?;
         let image = indexed.unsqueeze(0)?;
 
+        let start = std::time::Instant::now();
         let r = unet.forward(&image.ten()?)?;
         println!("r: \n{:?}", r);
         let r = r.to(&flash_powder::factory::ToOptions {
@@ -402,9 +404,9 @@ pub fn main() -> Result<(), anyhow::Error> {
             &[2, img.height() as usize, img.width() as usize],
             &Default::default(),
         )?;
-        mask_image
-            .i_mut((.., 64..(896 + 64), 128..1792))?
-            .copy_(&r.squeeze()?)?;
+        mask_image.i_mut(dimension)?.copy_(&r.squeeze()?)?;
+        let duration = (std::time::Instant::now() - start).as_secs_f64();
+        println!("{argument}: {duration:.2}s"); // First 0.29s, subseq 0.18
 
         let t255: Tensor = 255.try_into()?;
         let max = mask_image.argmax(Some(0), Some(true))?.mul(&t255)?;
