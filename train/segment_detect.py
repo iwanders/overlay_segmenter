@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import argparse
-import sys
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +19,39 @@ else:
     best_device = torch.device("cpu")
 
 
+def grow_mask(mask, iterations=1):
+    """
+    Dilates a binary mask by 1 pixel (or more) using PyTorch convolution.
+    Assumes mask shape: (N, C, H, W) or (C, H, W)
+    """
+    # Ensure mask is float and has batch/channel dimensions if necessary
+    is_1d = mask.ndim == 2
+    if is_1d:
+        mask = mask.unsqueeze(0).unsqueeze(0)
+    elif mask.ndim == 3:
+        mask = mask.unsqueeze(0)
+
+    orig_dtype = mask.dtype
+    mask = mask.float()
+
+    # 3x3 structuring element for dilation
+    kernel = torch.ones((1, 1, 3, 3), device=mask.device)
+
+    # Perform iterations
+    for _ in range(iterations):
+        # Pad by 1 to maintain original dimensions after convolution
+        padded_mask = F.pad(mask, (1, 1, 1, 1), mode="replicate")
+        # Convolve and binarize (values > 0 become 1)
+        mask = (F.conv2d(padded_mask, kernel, padding=0) > 0).float()
+
+    # Revert to original dimensions/type
+    if is_1d:
+        return mask.squeeze(0).squeeze(0).to(orig_dtype)
+    elif mask.shape[0] == 1:
+        return mask.squeeze(0).to(orig_dtype)
+    return mask.to(orig_dtype)
+
+
 def create_distincting_kernel(all_segments, desired_segment) -> Tensor:
     # Ideally this is created on demand, based on which segments are possible in this position.
     # Take the OR of all the bitmasks.
@@ -34,7 +67,23 @@ def create_distincting_kernel(all_segments, desired_segment) -> Tensor:
     print("max_values shape: ", max_values.shape)
     print("desired_segment shape: ", desired_segment.shape)
 
+    # Grow the desired one by one pixel, because otherwise we may get some slight black borders next to the white
+    # of the desired.
+    # desired_segment = grow_mask(desired_segment)
+    # huh, without gives a better distinction... with; 20.96 vs 12.5, without; 19.9 vs 10.15
+
+    # what if there is a section we in this tile, that is not in any of the others?
+    distinct = desired_segment.clone()
+    for s in all_segments:
+        if s.equal(desired_segment):
+            continue
+        distinct &= s
+    distinct_max = distinct.max()
+    if distinct_max.item() and all_segments:
+        print("Would have distinct!", distinct_max)
+
     max_values[desired_segment] = desired_segment[desired_segment].to(torch.float)
+    # max_values += distinct.to(torch.float) * 0.5
     return max_values
 
 
@@ -67,12 +116,13 @@ if __name__ == "__main__":
     distincting_kernel = create_distincting_kernel(all_segments, desired_segment)
     torchvision.utils.save_image(
         distincting_kernel,
-        f"/tmp/distincting_kernel_d_{segment_dirname}_{args.segment.name}.png",
+        f"/tmp/{args.segment.name}_distincting_kernel_d_{segment_dirname}.png",
         normalize=True,
     )
     distincting_kernel = distincting_kernel
 
     masked = load_image_file(args.mask, device="cpu") / 255.0
+    shutil.copy(args.segment, f"/tmp/{args.segment.name}")
 
     # print("masked shape", masked.shape)
     # print("segment shape", segment.shape, segment.max())
@@ -95,7 +145,7 @@ if __name__ == "__main__":
     max_index = torch.argmax(output)
     torchvision.utils.save_image(
         output,
-        f"/tmp/output_d_{segment_dirname}_{args.segment.name}.png",
+        f"/tmp/{args.segment.name}_output_d_{segment_dirname}.png",
         normalize=True,
     )
 
@@ -116,7 +166,7 @@ if __name__ == "__main__":
         for ppos, _, _ in peaks:
             prevpos = ppos
             dist = np.linalg.norm((curpos - prevpos))
-            if dist < 10:
+            if dist < 20:
                 skip = True
                 break
         if not skip:
@@ -162,11 +212,11 @@ if __name__ == "__main__":
             boxes=boxes,
             labels=labels,
             colors=colors.get(i, "gray"),
-            font_size=20,
+            #  font_size=20,
         )
     torchvision.utils.save_image(
         tensor_0_255 / 255.0,
-        f"/tmp/output_d_{segment_dirname}_{args.segment.name}_labelled.png",
+        f"/tmp/{args.segment.name}_output_d_{segment_dirname}_labelled.png",
         normalize=False,
     )
 
