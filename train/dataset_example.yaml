@@ -1,3 +1,9 @@
+# TODO:
+# - Modify such that we can handle multiple output classess, from channels of input image.
+# - Ability to collapse channels (such that we can combine classes from input image).
+# - Probably need to handle alpha as well...
+# - What about confidence output?
+
 train_config:
     learning_rate: 0.00025
     multi_step_lr:
