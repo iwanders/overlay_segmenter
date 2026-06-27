@@ -232,7 +232,7 @@ class ImageLoader:
                 image = image[0:3, :, :].clone()
         return image
 
-    def load_images(self, image_dir: Path) -> list[Tensor]:
+    def load_images(self, image_dir: Path) -> list[tuple[Path, Tensor]]:
         to_load = sorted(list(image_dir.rglob("*.png")))
 
         def load_img(f):
@@ -243,7 +243,7 @@ class ImageLoader:
 
         with ThreadPoolExecutor() as executor:
             res = list(executor.map(load_img, to_load))
-            return [img for _, img in sorted(res)]
+            return [(path, img) for path, img in sorted(res)]
 
 
 @dataclass
@@ -1362,6 +1362,8 @@ class DataPipeline:
                                 full_dir,
                             )
                         )
+                    # Drop the filenames.
+                    this_set = [img for _, img in this_set]
                     masks = []
                     for t in this_set:
                         labels = t[3, :, :] >= (input_group.mask_alpha * 255)
@@ -1398,24 +1400,38 @@ class DataPipeline:
                                 else self._data_config.base_dir
                             )
                             full_dir = base_dir / subdir
-
-                            all_images[category_i].extend(
-                                loader.load_images(
-                                    full_dir,
-                                )
+                            images_with_name = loader.load_images(
+                                full_dir,
                             )
-                    labels, rgbas = all_images
-                    int_labels = []
-                    for l in labels:
-                        labels = l[1, :, :]
-                        labels = labels.to(torch.int64)
-                        int_labels.append(labels)
+                            # strip the path up to the category.
+                            images_with_name = [
+                                (str(name.relative_to(base_dir)), img)
+                                for name, img in images_with_name
+                            ]
+                            all_images[category_i].extend(images_with_name)
 
-                    this_set = [
-                        LabelledOverlay(label=label, overlay=overlay)
-                        for label, overlay in zip(int_labels, rgbas)
-                    ]
-                    self._input_groups[name] = this_set
+                    # next, zip up the images.
+                    labels, rgbas = all_images
+                    labels_dict = dict(labels)
+                    rgbas_dict = dict(rgbas)
+                    notpaired = labels_dict.keys() ^ rgbas_dict.keys()
+                    if notpaired:
+                        print(f"Missing counterparts for: {str(notpaired)}")
+                        print("continuing but skipping those")
+
+                    # Find exact counterparts and convert labels to integers.
+                    paired_label_image = []
+                    for k, label_3channel in labels_dict.items():
+                        rgb = rgbas_dict.get(k)
+                        if rgb is None:
+                            print(f"Missing {k}, skipping this tile")
+                            continue
+                        labelled = label_3channel[1, :, :]
+                        labelled = labelled.to(torch.int64)
+                        paired = LabelledOverlay(label=labelled, overlay=rgb)
+                        paired_label_image.append(paired)
+
+                    self._input_groups[name] = paired_label_image
 
             else:
                 this_set = []
@@ -1426,12 +1442,11 @@ class DataPipeline:
                         else self._data_config.base_dir
                     )
                     full_dir = base_dir / subdir
-
-                    this_set.extend(
-                        loader.load_images(
-                            full_dir,
-                        )
+                    these_images = loader.load_images(
+                        full_dir,
                     )
+                    these_images = [img for _p, img in these_images]
+                    this_set.extend(these_images)
                 self._input_groups[name] = this_set
 
     def load_glyphsets(self):

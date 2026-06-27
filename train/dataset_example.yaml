@@ -22,8 +22,10 @@ train_config:
         0: 0
         # Foreground
         255: 1
-        # Foreground special
+        # Foreground special1
         128: 2
+        # Foreground special2
+        64: 2
 
 _bg_input: &bg_input
     remove_alpha: true
