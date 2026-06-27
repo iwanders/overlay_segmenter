@@ -13,12 +13,16 @@ import numpy as np
 import torch
 import torchvision
 import yaml
+from pydantic import BaseModel
+from torch import Tensor
+
 from dataset_generator import (
     DataPipeline,
     DynamicGenerator,
+    label_map_to_rgbmask,
+    mask_label_map,
 )
 from model import Unet
-from pydantic import BaseModel
 from util import (
     lookup_device,
 )
@@ -37,9 +41,11 @@ class TrainConfig(BaseModel):
     validation_ratio: float = 0.1
     manual_seed: int = 3
     model_seed: int = 4
+    channel_out: int = 2
     generation_seed: int = 42
     epoch_stop: int = 100_000_000
     output_dir: Path = Path("/tmp/train/")
+    label_map: dict[int, int] = {0: 0, 255: 1}
 
 
 parser = argparse.ArgumentParser(prog="train")
@@ -90,13 +96,14 @@ train_pipeline.post_image_init()
 validation_set = [train_pipeline.generate(rng) for _ in range(100)]
 validation_set = [(a.to(device), b.to(device)) for a, b in validation_set]
 
-
 if True:
     for i, (img, mask) in enumerate(validation_set):
         epoch_dir = train_config.output_dir / "validation"
         epoch_dir.mkdir(exist_ok=True, parents=True)
         out_path = epoch_dir / f"validation_{i:0>3}.png"
-        torchvision.utils.save_image([img, torch.stack([mask, mask, mask])], out_path)
+        label_map = mask_label_map(mask, train_config.label_map)
+        rgbmask = label_map_to_rgbmask(label_map)
+        torchvision.utils.save_image([img, rgbmask], out_path, normalize=False)
 
 
 # Larger batches (no change to learning rate) is not actually better?
@@ -124,7 +131,7 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 best_vloss = 1_000_000.0
 torch.manual_seed(train_config.model_seed)
-model = Unet(channels_in=3, channels_out=2)
+model = Unet(channels_in=3, channels_out=train_config.channel_out)
 
 model.to(device)
 
@@ -196,7 +203,7 @@ def dump_stats(dir: Path, stats: dict):
         json.dump(stats, f, indent=2)
 
 
-def train_one_epoch(epoch_index):
+def train_one_epoch(epoch_index, label_lookup_map):
     epoch_loss = 0.0
     count = 0
 
@@ -211,9 +218,11 @@ def train_one_epoch(epoch_index):
         # print("data", type(data))
         # Every data instance is an input + label pair
         inputs, labels = data
-        # print("inputs", type(inputs), inputs.shape)
-        # print("labels", type(labels), labels.shape)
 
+        labels = mask_label_map(labels, label_lookup_map)
+
+        # print("inputs", type(inputs), inputs.shape)
+        # print("labels", type(labels), labels.shape, labels.min(), labels.max())
         count += 1
 
         # Zero your gradients for every batch!
@@ -276,9 +285,7 @@ for epoch in range(epoch_start, train_config.epoch_stop):
     start_train = time.time()
     # Make sure gradient tracking is on, and do a pass over the data
     model.train(True)
-    avg_loss = train_one_epoch(
-        epoch,
-    )
+    avg_loss = train_one_epoch(epoch, label_lookup_map=train_config.label_map)
     end_train = time.time()
     epoch_record["train_loss"] = avg_loss
     epoch_record["train_time"] = end_train - start_train
@@ -295,6 +302,7 @@ for epoch in range(epoch_start, train_config.epoch_stop):
     with torch.no_grad():
         for i, vdata in enumerate(validation_loader):
             vinputs, vlabels = vdata
+            vlabels = mask_label_map(vlabels, train_config.label_map)
             voutputs = model(vinputs)
             vloss = loss_fn(voutputs, vlabels)
             running_vloss += vloss
@@ -322,14 +330,25 @@ for epoch in range(epoch_start, train_config.epoch_stop):
                     """
                     mask_img = epoch_dir / f"eval_{real_i:0>5}_mask.png"
                     index_mask = this_slice.argmax(0)
-                    torchvision.utils.save_image(index_mask.to(torch.float), mask_img)
+                    rgbmask = label_map_to_rgbmask(index_mask)
+                    torchvision.utils.save_image(rgbmask, mask_img, normalize=False)
                     # print(f"index_mask: {index_mask.shape}", index_mask)
+
+                    # Only do the first three slices...
+                    h, w = this_slice.shape[1], this_slice.shape[2]
+                    values_rgb = torch.zeros(
+                        (3, h, w), device=this_slice.device, dtype=torch.float
+                    )
                     values_img = epoch_dir / f"eval_{real_i:0>5}_values.png"
-                    t = this_slice[1, :, :]
-                    span = t.max() - t.min()
-                    t = (t - t.min()) / span
-                    torchvision.utils.save_image(t.to(torch.float), values_img)
+                    for i in range(1, min(this_slice.shape[0], 4)):
+                        t = this_slice[i, :, :]
+                        span = t.max() - t.min()
+                        t = (t - t.min()) / span
+                        values_rgb[i - 1, :, :] = t
+                    torchvision.utils.save_image(values_rgb, values_img)
+
                     target_img = epoch_dir / f"eval_{real_i:0>5}_target.png"
+                    this_target = label_map_to_rgbmask(this_target)
                     torchvision.utils.save_image(
                         this_target.to(torch.float), target_img
                     )

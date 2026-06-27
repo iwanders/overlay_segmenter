@@ -12,11 +12,12 @@ import numpy as np
 import torch
 import torchvision
 import yaml
-from letter_support import Glyphset
 from pydantic import BaseModel, ConfigDict
-from pytorch_contrib import _hsv_to_rgb, _rgb_to_hsv
 from torch import Tensor
 from torchvision.io import decode_jpeg, encode_jpeg
+
+from letter_support import Glyphset
+from pytorch_contrib import _hsv_to_rgb, _rgb_to_hsv
 from util import (
     load_image_file,
     load_image_file_u8,
@@ -1542,6 +1543,49 @@ class DataPipeline:
             return [self.generate(rng) for _ in range(batch_size)]
 
         return batch_generator
+
+
+def mask_label_map(m: Tensor, label_map: dict[int, int]) -> Tensor:
+    if m.dim() == 2:
+        # single image.
+        new_mask = torch.zeros(m.shape, dtype=torch.int64, device=m.device)
+        for k, v in label_map.items():
+            where = m == k
+            ones = torch.ones(m.shape, dtype=torch.int64, device=m.device)
+            new_mask[where] = ones[where] * v
+        return new_mask
+    elif m.dim() == 3:
+        # with batch
+        new_mask = torch.zeros(m.shape, dtype=torch.int64, device=m.device)
+        for i in range(m.shape[0]):
+            for k, v in label_map.items():
+                where = m[i, :, :] == k
+                ones = torch.ones(m.shape[1:], dtype=torch.int64, device=m.device)
+                new_mask[i, :, :][where] = ones[where] * v
+        return new_mask
+    else:
+        raise NotImplementedError(f"missing mask_label_map handling for {m.shape}")
+
+
+def label_map_to_rgbmask(m: Tensor) -> Tensor:
+    if m.dim() == 2:
+        h = m.shape[0]
+        w = m.shape[1]
+        rgbmask = torch.zeros((3, h, w), dtype=torch.float, device=m.device)
+        ones = torch.ones((h, w), dtype=torch.float, device=m.device)
+        for i in range(3):
+            where = m == i
+            rgbmask[i, where] = ones[where] * float(i)
+        return rgbmask
+    elif m.dim() == 3:
+        B = m.shape[0]
+        h = m.shape[1]
+        w = m.shape[2]
+
+        rgbmask = torch.zeros((B, 3, h, w), dtype=torch.float, device=m.device)
+        for i in range(B):
+            rgbmask[i, :, :, :] = label_map_to_rgbmask(m[i, :, :])
+        return rgbmask
 
 
 def test_new_spec():

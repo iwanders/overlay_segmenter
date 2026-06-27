@@ -15,6 +15,15 @@ train_config:
     manual_seed: 3
     model_seed: 4
     generation_seed: 42
+    # CHannel out needs to map to the number of unique (and consecutive from 0) indices in label_map.
+    channel_out: 3
+    label_map:
+        # Background
+        0: 0
+        # Foreground
+        255: 1
+        # Foreground special
+        128: 2
 
 _bg_input: &bg_input
     remove_alpha: true
