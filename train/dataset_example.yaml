@@ -27,9 +27,17 @@ _bg_input: &bg_input
     device: cpu
     validation_split: true
 
-_fg_input: &fg_input
+_fg_input: &fg_inputz
     remove_alpha: false
-    base_dir: "{base_dir}/foreground/"
+    #is_overlay: true
+    label_directory_name: labels
+    rgba_directory_name: rgba
+    base_dir: "{base_dir}/foreground/{rgba_or_label_directory}"
+
+_fg_input_no_labels: &fg_input
+    remove_alpha: false
+    #is_overlay: true
+    base_dir: "{base_dir}/foreground/rgba/"
 
 data_config:
     base_dir: "../../dataset_example/"

@@ -12,12 +12,11 @@ import numpy as np
 import torch
 import torchvision
 import yaml
+from letter_support import Glyphset
 from pydantic import BaseModel, ConfigDict
+from pytorch_contrib import _hsv_to_rgb, _rgb_to_hsv
 from torch import Tensor
 from torchvision.io import decode_jpeg, encode_jpeg
-
-from letter_support import Glyphset
-from pytorch_contrib import _hsv_to_rgb, _rgb_to_hsv
 from util import (
     load_image_file,
     load_image_file_u8,
@@ -233,7 +232,7 @@ class ImageLoader:
         return image
 
     def load_images(self, image_dir: Path) -> list[Tensor]:
-        to_load = list(image_dir.rglob("*.png"))
+        to_load = sorted(list(image_dir.rglob("*.png")))
 
         def load_img(f):
             img = self.load_image(f)
@@ -398,6 +397,7 @@ class DatasetGenerator:
         f_x,
         f_y,
         return_overlay=False,
+        label_overlay=False,
         dtype=torch.float,
     ) -> OverlayResult:
         # We've selected the position in the canvas, and the position in the overlay.
@@ -460,7 +460,15 @@ class DatasetGenerator:
 
         # Apply the overlay
         if foreground.shape[0] == 4:
-            background[:, y1:y2, x1:x2] = foreground[:, fg_y1:fg_y2, fg_x1:fg_x2]
+            if label_overlay:
+                single_channel = foreground[0, fg_y1:fg_y2, fg_x1:fg_x2]
+                window_in_overlay = single_channel
+                indices = window_in_overlay != 0
+                background[0, y1:y2, x1:x2][indices] = window_in_overlay[indices]
+                background[1, y1:y2, x1:x2][indices] = window_in_overlay[indices]
+                background[2, y1:y2, x1:x2][indices] = window_in_overlay[indices]
+            else:
+                background[:, y1:y2, x1:x2] = foreground[:, fg_y1:fg_y2, fg_x1:fg_x2]
         else:
             background[0:3, y1:y2, x1:x2] = foreground[0:3, fg_y1:fg_y2, fg_x1:fg_x2]
             if dtype == torch.float:
@@ -633,6 +641,9 @@ class DataInput(BaseModel):
     size: tuple[int, int] | None = None
     device: str = "auto"
     validation_split: bool = False
+    is_overlay: bool = False
+    label_directory_name: str | None = None
+    rgba_directory_name: str | None = None
 
 
 class ImageApplicatorConfig(BaseModel):
@@ -976,7 +987,8 @@ class DataStack(BaseModel):
     # List of inputs, (key of DataApplicator, key of DataInput)
     inputs: list[tuple[str, str]]
     for_input_keys: dict[str, list[str]] = {"__dumy__": ["__DUMMY__"]}
-    # The layer that will make the mask.
+    # The layer that will make the mask. This is only used if an explicit mask is not provided through the
+    # label_directory_name system.
     mask_layer: int = 1
     mask_alpha: float = 0.5
     # List of postprocessing actions, mapping to DataPostprocess
@@ -996,6 +1008,12 @@ class DataConfig(BaseModel):
     generator: list[DataStack]
     post_process: dict[str, DataPostprocess] = {}
     glyphsets: dict[str, GlyphsetConfig] = {}
+
+
+class LabelledOverlay(BaseModel):
+    label: Tensor
+    overlay: Tensor
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ImageApplicator:
@@ -1071,9 +1089,17 @@ class ImageApplicator:
         mask = None
         placed = []
         for i in range(self._get_count(rng)):
-            overlay = overlay_source.create(rng)
+            raw_overlay = overlay_source.create(rng)
+            raw_mask = None
+            if isinstance(raw_overlay, LabelledOverlay):
+                overlay = raw_overlay.overlay
+                raw_mask = raw_overlay.label
+            else:
+                overlay = raw_overlay
+
             for preprocessor in self._pre_process_image:
                 overlay = preprocessor.apply(rng, overlay)
+
             o_height, o_width = overlay.shape[1:]
             c_height, c_width = canvas.shape[1:]
 
@@ -1144,7 +1170,27 @@ class ImageApplicator:
 
             sub_canvas = overlay_result.composite
             if return_mask:
-                mask = overlay_result.overlaid
+                if raw_mask is None:
+                    mask = overlay_result.overlaid
+                else:
+                    mask_canvas = torch.zeros(
+                        (4, canvas.shape[1], canvas.shape[2]),
+                        dtype=torch.uint8,
+                        device=self._device,
+                    )
+                    mask_canvas[3, :, :] = 255
+                    mask_result = DatasetGenerator.image_overlay(
+                        mask_canvas,
+                        raw_mask,
+                        c_x,
+                        c_y,
+                        o_x,
+                        o_y,
+                        return_overlay=False,
+                        label_overlay=True,
+                        dtype=torch.uint8,
+                    )
+                    mask = mask_result.composite
 
             blend_alpha = self._determine_blend_alpha(rng, self._config.blend_alpha)
             blend_alpha = int(blend_alpha * 255)
@@ -1208,6 +1254,7 @@ class DataGenerator:
 
         # Perform the masking.
         mask = mask[3, :, :] >= self._config.mask_alpha * 255
+        # mask = mask[0, :, :]
         mask = mask.to(torch.int64)
 
         return canvas, mask
@@ -1271,20 +1318,26 @@ class DataPipeline:
         validation_pipeline.post_image_init()
         return validation_pipeline
 
-    def _substitute_path(self, path: Path) -> Path:
+    def _substitute_path(self, path: Path, extra=None) -> Path:
+        if extra is None:
+            extra = {}
         path_as_str = str(path)
-        return Path(path_as_str.format(base_dir=self._data_config.base_dir))
+        return Path(path_as_str.format(base_dir=self._data_config.base_dir, **extra))
 
     def print_inputs(self):
         for name, images in self._input_groups.items():
-            print(
-                f"Inputs: {name} has {len(images)} images with {images[0].shape} in {images[0].dtype} size on {images[0].device}"
-            )
+            if isinstance(images[0], LabelledOverlay):
+                print(
+                    f"Inputs: {name} has {len(images)} labelled images with {images[0].overlay.shape} in {images[0].overlay.dtype} size on {images[0].overlay.device}"
+                )
+            else:
+                print(
+                    f"Inputs: {name} has {len(images)} images with {images[0].shape} in {images[0].dtype} size on {images[0].device}"
+                )
 
     def load_input_groups(self):
         self._input_groups = {}
         for name, input_group in self._data_config.image_groups.items():
-            this_set = []
             loader = ImageLoader(
                 crop_top_left=input_group.top_left,
                 crop_size=input_group.size,
@@ -1292,21 +1345,60 @@ class DataPipeline:
                 device=lookup_device(input_group.device),
                 as_u8=True,
             )
+            if input_group.is_overlay:
+                # If it is an overlay, we have two images for each.
+                # LabelledOverlay
+                if (
+                    input_group.label_directory_name is None
+                    or input_group.rgba_directory_name is None
+                ):
+                    print("missing label_directory_name or rgba_directory_name")
 
-            for subdir in input_group.dirs:
-                base_dir = (
-                    self._substitute_path(input_group.base_dir)
-                    if input_group.base_dir is not None
-                    else self._data_config.base_dir
-                )
-                full_dir = base_dir / subdir
+                all_images = [[], []]
+                for subdir in input_group.dirs:
+                    for category_i, subdir_name in enumerate(
+                        [
+                            input_group.label_directory_name,
+                            input_group.rgba_directory_name,
+                        ]
+                    ):
+                        base_dir = (
+                            self._substitute_path(
+                                input_group.base_dir,
+                                {"rgba_or_label_directory": subdir_name},
+                            )
+                            if input_group.base_dir is not None
+                            else self._data_config.base_dir
+                        )
+                        full_dir = base_dir / subdir
 
-                this_set.extend(
-                    loader.load_images(
-                        full_dir,
+                        all_images[category_i].extend(
+                            loader.load_images(
+                                full_dir,
+                            )
+                        )
+                this_set = [
+                    LabelledOverlay(label=label, overlay=overlay)
+                    for label, overlay in zip(*all_images)
+                ]
+                self._input_groups[name] = this_set
+
+            else:
+                this_set = []
+                for subdir in input_group.dirs:
+                    base_dir = (
+                        self._substitute_path(input_group.base_dir)
+                        if input_group.base_dir is not None
+                        else self._data_config.base_dir
                     )
-                )
-            self._input_groups[name] = this_set
+                    full_dir = base_dir / subdir
+
+                    this_set.extend(
+                        loader.load_images(
+                            full_dir,
+                        )
+                    )
+                self._input_groups[name] = this_set
 
     def load_glyphsets(self):
         self._glyphsets = {}
