@@ -397,7 +397,6 @@ class DatasetGenerator:
         f_x,
         f_y,
         return_overlay=False,
-        label_overlay=False,
         dtype=torch.float,
     ) -> OverlayResult:
         # We've selected the position in the canvas, and the position in the overlay.
@@ -405,8 +404,8 @@ class DatasetGenerator:
         # We will place the overlay coordinate onto the canvas coordinate.
 
         # Calculate the overlapping region
-        bg_h, bg_w = background.shape[1], background.shape[2]
-        fg_h, fg_w = foreground.shape[1], foreground.shape[2]
+        bg_h, bg_w = background.shape[-2], background.shape[-1]
+        fg_h, fg_w = foreground.shape[-2], foreground.shape[-1]
 
         b_x = int(b_x - bg_w / 2)
         b_y = int(b_y - bg_h / 2)
@@ -460,21 +459,23 @@ class DatasetGenerator:
 
         # Apply the overlay
         if foreground.shape[0] == 4:
-            if label_overlay:
-                single_channel = foreground[0, fg_y1:fg_y2, fg_x1:fg_x2]
-                window_in_overlay = single_channel
-                indices = window_in_overlay != 0
-                background[0, y1:y2, x1:x2][indices] = window_in_overlay[indices]
-                background[1, y1:y2, x1:x2][indices] = window_in_overlay[indices]
-                background[2, y1:y2, x1:x2][indices] = window_in_overlay[indices]
-            else:
-                background[:, y1:y2, x1:x2] = foreground[:, fg_y1:fg_y2, fg_x1:fg_x2]
+            background[:, y1:y2, x1:x2] = foreground[:, fg_y1:fg_y2, fg_x1:fg_x2]
         else:
-            background[0:3, y1:y2, x1:x2] = foreground[0:3, fg_y1:fg_y2, fg_x1:fg_x2]
             if dtype == torch.float:
+                background[0:3, y1:y2, x1:x2] = foreground[
+                    0:3, fg_y1:fg_y2, fg_x1:fg_x2
+                ]
                 background[3, :, :] = 1.0
             elif dtype == torch.uint8:
+                background[0:3, y1:y2, x1:x2] = foreground[
+                    0:3, fg_y1:fg_y2, fg_x1:fg_x2
+                ]
                 background[3, :, :] = 255
+            elif dtype == torch.int64:
+                single_channel = foreground[fg_y1:fg_y2, fg_x1:fg_x2]
+                indices = single_channel != 0
+                background[y1:y2, x1:x2][indices] = single_channel[indices]
+
             else:
                 raise NotImplementedError("dtype not supported")
 
@@ -644,6 +645,7 @@ class DataInput(BaseModel):
     is_overlay: bool = False
     label_directory_name: str | None = None
     rgba_directory_name: str | None = None
+    mask_alpha: float = 0.5
 
 
 class ImageApplicatorConfig(BaseModel):
@@ -990,7 +992,6 @@ class DataStack(BaseModel):
     # The layer that will make the mask. This is only used if an explicit mask is not provided through the
     # label_directory_name system.
     mask_layer: int = 1
-    mask_alpha: float = 0.5
     # List of postprocessing actions, mapping to DataPostprocess
     post_process: list[str] = []
 
@@ -1091,7 +1092,7 @@ class ImageApplicator:
         for i in range(self._get_count(rng)):
             raw_overlay = overlay_source.create(rng)
             raw_mask = None
-            if isinstance(raw_overlay, LabelledOverlay):
+            if return_mask:
                 overlay = raw_overlay.overlay
                 raw_mask = raw_overlay.label
             else:
@@ -1171,14 +1172,15 @@ class ImageApplicator:
             sub_canvas = overlay_result.composite
             if return_mask:
                 if raw_mask is None:
-                    mask = overlay_result.overlaid
+                    raise ValueError(
+                        "raw mask is None while return mask, something is wrong :/"
+                    )
                 else:
                     mask_canvas = torch.zeros(
-                        (4, canvas.shape[1], canvas.shape[2]),
-                        dtype=torch.uint8,
+                        (canvas.shape[1], canvas.shape[2]),
+                        dtype=torch.int64,
                         device=self._device,
                     )
-                    mask_canvas[3, :, :] = 255
                     mask_result = DatasetGenerator.image_overlay(
                         mask_canvas,
                         raw_mask,
@@ -1187,8 +1189,7 @@ class ImageApplicator:
                         o_x,
                         o_y,
                         return_overlay=False,
-                        label_overlay=True,
-                        dtype=torch.uint8,
+                        dtype=torch.int64,
                     )
                     mask = mask_result.composite
 
@@ -1251,11 +1252,6 @@ class DataGenerator:
         # Perform postprocessing.
         for post_processor in self._post_processors:
             canvas = post_processor.apply(rng, canvas)
-
-        # Perform the masking.
-        mask = mask[3, :, :] >= self._config.mask_alpha * 255
-        # mask = mask[0, :, :]
-        mask = mask.to(torch.int64)
 
         return canvas, mask
 
@@ -1346,42 +1342,79 @@ class DataPipeline:
                 as_u8=True,
             )
             if input_group.is_overlay:
-                # If it is an overlay, we have two images for each.
-                # LabelledOverlay
                 if (
                     input_group.label_directory_name is None
-                    or input_group.rgba_directory_name is None
+                    and input_group.rgba_directory_name is None
                 ):
-                    print("missing label_directory_name or rgba_directory_name")
-
-                all_images = [[], []]
-                for subdir in input_group.dirs:
-                    for category_i, subdir_name in enumerate(
-                        [
-                            input_group.label_directory_name,
-                            input_group.rgba_directory_name,
-                        ]
-                    ):
+                    # traditional handling, we alpha mask here.
+                    this_set = []
+                    for subdir in input_group.dirs:
                         base_dir = (
-                            self._substitute_path(
-                                input_group.base_dir,
-                                {"rgba_or_label_directory": subdir_name},
-                            )
+                            self._substitute_path(input_group.base_dir)
                             if input_group.base_dir is not None
                             else self._data_config.base_dir
                         )
                         full_dir = base_dir / subdir
 
-                        all_images[category_i].extend(
+                        this_set.extend(
                             loader.load_images(
                                 full_dir,
                             )
                         )
-                this_set = [
-                    LabelledOverlay(label=label, overlay=overlay)
-                    for label, overlay in zip(*all_images)
-                ]
-                self._input_groups[name] = this_set
+                    masks = []
+                    for t in this_set:
+                        labels = t[3, :, :] >= (input_group.mask_alpha * 255)
+                        labels = labels.to(torch.int64) * 255
+                        masks.append(labels)
+                    this_set = [
+                        LabelledOverlay(label=label, overlay=overlay)
+                        for label, overlay in zip(masks, this_set)
+                    ]
+                    self._input_groups[name] = this_set
+                else:
+                    # If it is an overlay, we have two images for each.
+                    # LabelledOverlay
+                    if (
+                        input_group.label_directory_name is None
+                        or input_group.rgba_directory_name is None
+                    ):
+                        print("missing label_directory_name or rgba_directory_name")
+
+                    all_images = [[], []]
+                    for subdir in input_group.dirs:
+                        for category_i, subdir_name in enumerate(
+                            [
+                                input_group.label_directory_name,
+                                input_group.rgba_directory_name,
+                            ]
+                        ):
+                            base_dir = (
+                                self._substitute_path(
+                                    input_group.base_dir,
+                                    {"rgba_or_label_directory": subdir_name},
+                                )
+                                if input_group.base_dir is not None
+                                else self._data_config.base_dir
+                            )
+                            full_dir = base_dir / subdir
+
+                            all_images[category_i].extend(
+                                loader.load_images(
+                                    full_dir,
+                                )
+                            )
+                    labels, rgbas = all_images
+                    int_labels = []
+                    for l in labels:
+                        labels = l[1, :, :]
+                        labels = labels.to(torch.int64)
+                        int_labels.append(labels)
+
+                    this_set = [
+                        LabelledOverlay(label=label, overlay=overlay)
+                        for label, overlay in zip(int_labels, rgbas)
+                    ]
+                    self._input_groups[name] = this_set
 
             else:
                 this_set = []
@@ -1536,8 +1569,11 @@ def test_new_spec():
     output = Path("/tmp/")
     for i, (sample_img, sample_mask) in enumerate(generated):
         torchvision.utils.save_image(sample_img, output / f"sample_{i}_img.png")
+        print("sample_mask min max", sample_mask.min(), sample_mask.max())
         torchvision.utils.save_image(
-            sample_mask.to(torch.float), output / f"sample_{i}_mask.png"
+            sample_mask.to(torch.float) / 255.0,
+            output / f"sample_{i}_mask.png",
+            normalize=False,
         )
     sys.exit(0)
 

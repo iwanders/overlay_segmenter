@@ -27,16 +27,19 @@ _bg_input: &bg_input
     device: cpu
     validation_split: true
 
-_fg_input: &fg_inputz
+# Foreground with images that are actually images denoting labels.
+_fg_input: &fg_input
     remove_alpha: false
-    #is_overlay: true
+    is_overlay: true
     label_directory_name: labels
     rgba_directory_name: rgba
     base_dir: "{base_dir}/foreground/{rgba_or_label_directory}"
 
-_fg_input_no_labels: &fg_input
+# Foreground images made using the alpha mask of the rgba image.
+_fg_input_no_labels: &fg_input_disabled
     remove_alpha: false
-    #is_overlay: true
+    is_overlay: true
+    mask_alpha: 0.5
     base_dir: "{base_dir}/foreground/rgba/"
 
 data_config:
@@ -174,7 +177,6 @@ data_config:
           for_input_keys:
               label: [LevelOne, LevelTwo]
           mask_layer: 1
-          mask_alpha: 0.5
           post_process:
               - resize_roundtrip
               - fine_blur
