@@ -8,7 +8,7 @@ Use [overlay_segmenter](./overlay_segmenter) to run the network, should be prett
 
 Done with Python, using the [./train](./train) directory, an example;
 ```
-./train.py ./dataset_example.yaml
+./train.py -c ./dataset_example.yaml
 ```
 
 Resume training from a checkpoint with:

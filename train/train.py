@@ -13,13 +13,12 @@ import numpy as np
 import torch
 import torchvision
 import yaml
-from pydantic import BaseModel
-
 from dataset_generator import (
     DataPipeline,
     DynamicGenerator,
 )
 from model import Unet
+from pydantic import BaseModel
 from util import (
     lookup_device,
 )
@@ -43,7 +42,7 @@ class TrainConfig(BaseModel):
     output_dir: Path = Path("/tmp/train/")
 
 
-parser = argparse.ArgumentParser(prog="letter_support")
+parser = argparse.ArgumentParser(prog="train")
 parser.add_argument(
     "-c",
     dest="config_file",
