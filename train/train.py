@@ -315,7 +315,8 @@ for epoch in range(epoch_start, train_config.epoch_stop):
 
             # And lets write that to disk shall we.
             batch_size = vinputs.shape[0]
-            if True:  # and (epoch < 10 or epoch % 10 == 0):
+            # if True:  # and (epoch < 10 or epoch % 10 == 0):
+            if epoch < 10 or epoch % 10 == 0:
                 epoch_dir.mkdir(parents=True, exist_ok=True)
                 for frame_i in range(batch_size):
                     real_i = i * batch_size + frame_i
