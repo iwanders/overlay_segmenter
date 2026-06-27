@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 #
 
+import colorsys
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
@@ -1582,16 +1583,10 @@ def mask_label_map(m: Tensor, label_map: dict[int, int]) -> Tensor:
         raise NotImplementedError(f"missing mask_label_map handling for {m.shape}")
 
 
-def label_map_to_rgbmask(m: Tensor) -> Tensor:
+def label_map_to_rgbmask(m: Tensor, label_to_rgb) -> Tensor:
     if m.dim() == 2:
-        h = m.shape[0]
-        w = m.shape[1]
-        rgbmask = torch.zeros((3, h, w), dtype=torch.float, device=m.device)
-        ones = torch.ones((h, w), dtype=torch.float, device=m.device)
-        for i in range(3):
-            where = m == i
-            rgbmask[i, where] = ones[where] * float(i)
-        return rgbmask
+        return label_to_rgb.to(device=m.device)[m].permute([2, 0, 1])
+
     elif m.dim() == 3:
         B = m.shape[0]
         h = m.shape[1]
@@ -1599,8 +1594,35 @@ def label_map_to_rgbmask(m: Tensor) -> Tensor:
 
         rgbmask = torch.zeros((B, 3, h, w), dtype=torch.float, device=m.device)
         for i in range(B):
-            rgbmask[i, :, :, :] = label_map_to_rgbmask(m[i, :, :])
+            rgbmask[i, :, :, :] = label_map_to_rgbmask(m[i, :, :], label_to_rgb)
         return rgbmask
+
+
+def generate_color_palette(classess: int, force_black=True) -> Tensor:
+    colors = []
+    if force_black:
+        colors.append((0, 0, 0))
+        classess -= 1
+    for i in range(classess):
+        # 1. Divide hue space evenly between 0.0 and 1.0
+        hue = i / classess
+
+        # 2. Keep saturation and value high for vibrant, distinct colors
+        saturation = 1.0
+        value = 1.0
+
+        # 3. Convert HSV to an RGB tuple (returns floats from 0.0 to 1.0)
+        rgb_float = colorsys.hsv_to_rgb(hue, saturation, value)
+
+        # 4. Scale to standard 0-255 integer format
+        # rgb_int = tuple(int(channel * 255) for channel in rgb_float)
+
+        colors.append(rgb_float)
+    return torch.tensor(colors)
+
+
+def generate_value_image(logits, label_to_rgb):
+    pass
 
 
 def test_new_spec():
@@ -1614,6 +1636,18 @@ def test_new_spec():
     rng = np.random.default_rng(3)
     generated = []
 
+    label_map = {
+        # Background
+        0: 0,
+        # Foreground
+        255: 1,
+        # Foreground special1
+        128: 2,
+        # Foreground special2
+        64: 2,
+    }
+    label_to_rgb = generate_color_palette(3)
+
     z.print_inputs()
     for i in range(10):
         a = z.generate(rng)
@@ -1623,14 +1657,17 @@ def test_new_spec():
         batch_generator=z.batch_generator_fun(rng), batch_size=4
     )
     rollout_gen = iter(batch_generator)
-    generated = [(img, mask.unsqueeze(1)) for img, mask in rollout_gen]
+    generated = [(img, mask) for img, mask in rollout_gen]
 
     output = Path("/tmp/")
     for i, (sample_img, sample_mask) in enumerate(generated):
         torchvision.utils.save_image(sample_img, output / f"sample_{i}_img.png")
         print("sample_mask min max", sample_mask.min(), sample_mask.max())
+        mask_labels = mask_label_map(sample_mask, label_map)
+        rgbmask = label_map_to_rgbmask(mask_labels, label_to_rgb)
+        # torchvision.utils.save_image([img, rgbmask], out_path, normalize=False)
         torchvision.utils.save_image(
-            sample_mask.to(torch.float) / 255.0,
+            rgbmask.to(torch.float),
             output / f"sample_{i}_mask.png",
             normalize=False,
         )

@@ -19,6 +19,7 @@ from torch import Tensor
 from dataset_generator import (
     DataPipeline,
     DynamicGenerator,
+    generate_color_palette,
     label_map_to_rgbmask,
     mask_label_map,
 )
@@ -79,6 +80,9 @@ torch.backends.cudnn.benchmark = False
 torch.manual_seed(train_config.manual_seed)
 
 
+label_to_rgb = generate_color_palette(train_config.channel_out)
+
+
 validation_set = []
 
 
@@ -101,8 +105,12 @@ if True:
         epoch_dir = train_config.output_dir / "validation"
         epoch_dir.mkdir(exist_ok=True, parents=True)
         out_path = epoch_dir / f"validation_{i:0>3}.png"
+        print(out_path)
         label_map = mask_label_map(mask, train_config.label_map)
-        rgbmask = label_map_to_rgbmask(label_map)
+        # Print unique values
+        print("label_map unique", torch.unique(label_map))
+
+        rgbmask = label_map_to_rgbmask(label_map, label_to_rgb)
         torchvision.utils.save_image([img, rgbmask], out_path, normalize=False)
 
 
@@ -330,7 +338,7 @@ for epoch in range(epoch_start, train_config.epoch_stop):
                     """
                     mask_img = epoch_dir / f"eval_{real_i:0>5}_mask.png"
                     index_mask = this_slice.argmax(0)
-                    rgbmask = label_map_to_rgbmask(index_mask)
+                    rgbmask = label_map_to_rgbmask(index_mask, label_to_rgb)
                     torchvision.utils.save_image(rgbmask, mask_img, normalize=False)
                     # print(f"index_mask: {index_mask.shape}", index_mask)
 
@@ -348,7 +356,7 @@ for epoch in range(epoch_start, train_config.epoch_stop):
                     torchvision.utils.save_image(values_rgb, values_img)
 
                     target_img = epoch_dir / f"eval_{real_i:0>5}_target.png"
-                    this_target = label_map_to_rgbmask(this_target)
+                    this_target = label_map_to_rgbmask(this_target, label_to_rgb)
                     torchvision.utils.save_image(
                         this_target.to(torch.float), target_img
                     )
