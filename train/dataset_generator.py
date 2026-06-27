@@ -1621,8 +1621,24 @@ def generate_color_palette(classess: int, force_black=True) -> Tensor:
     return torch.tensor(colors)
 
 
-def generate_value_image(logits, label_to_rgb):
-    pass
+def logits_to_rgb_values(logits, label_to_rgb) -> list[Tensor]:
+    output_channels = logits.shape[0]
+    height, width = logits.shape[1:]
+    if output_channels != len(label_to_rgb):
+        raise ValueError("Output channels doesn't match label to rgb length")
+
+    per_channel = []
+
+    for c in range(output_channels):
+        t = logits[c, :, :]
+        span = t.max() - t.min()
+        t = (t - t.min()) / span
+        color_tensor = label_to_rgb[c].to(device=logits.device)
+        solid_color_image = color_tensor.view(3, 1, 1).expand(3, height, width)
+        scaled_color = t * solid_color_image
+        per_channel.append(scaled_color)
+
+    return per_channel
 
 
 def test_new_spec():

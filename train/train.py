@@ -21,6 +21,7 @@ from dataset_generator import (
     DynamicGenerator,
     generate_color_palette,
     label_map_to_rgbmask,
+    logits_to_rgb_values,
     mask_label_map,
 )
 from model import Unet
@@ -105,10 +106,7 @@ if True:
         epoch_dir = train_config.output_dir / "validation"
         epoch_dir.mkdir(exist_ok=True, parents=True)
         out_path = epoch_dir / f"validation_{i:0>3}.png"
-        print(out_path)
         label_map = mask_label_map(mask, train_config.label_map)
-        # Print unique values
-        print("label_map unique", torch.unique(label_map))
 
         rgbmask = label_map_to_rgbmask(label_map, label_to_rgb)
         torchvision.utils.save_image([img, rgbmask], out_path, normalize=False)
@@ -323,43 +321,25 @@ for epoch in range(epoch_start, train_config.epoch_stop):
                     real_i = i * batch_size + frame_i
                     this_slice = voutputs[frame_i, :, :]
                     this_target = vlabels[frame_i, :, :]
-                    """
-                    print(f"outputs: {voutputs.shape}")
-                    print(
-                        f"this_slice: {this_slice.shape}, this_slice[0,:,:].min() and max",
-                        this_slice[0, :, :].min(),
-                        this_slice[0, :, :].max(),
-                    )
-                    print(
-                        "                                       this_slice[1,:,:].min() and max",
-                        this_slice[1, :, :].min(),
-                        this_slice[1, :, :].max(),
-                    )
-                    """
+
+                    # Calculated mask.
                     mask_img = epoch_dir / f"eval_{real_i:0>5}_mask.png"
                     index_mask = this_slice.argmax(0)
                     rgbmask = label_map_to_rgbmask(index_mask, label_to_rgb)
                     torchvision.utils.save_image(rgbmask, mask_img, normalize=False)
-                    # print(f"index_mask: {index_mask.shape}", index_mask)
 
-                    # Only do the first three slices...
-                    h, w = this_slice.shape[1], this_slice.shape[2]
-                    values_rgb = torch.zeros(
-                        (3, h, w), device=this_slice.device, dtype=torch.float
-                    )
+                    # Values
+                    values_rgb_stacked = logits_to_rgb_values(this_slice, label_to_rgb)
                     values_img = epoch_dir / f"eval_{real_i:0>5}_values.png"
-                    for i in range(1, min(this_slice.shape[0], 4)):
-                        t = this_slice[i, :, :]
-                        span = t.max() - t.min()
-                        t = (t - t.min()) / span
-                        values_rgb[i - 1, :, :] = t
-                    torchvision.utils.save_image(values_rgb, values_img)
+                    torchvision.utils.save_image(values_rgb_stacked, values_img)
 
+                    # Target
                     target_img = epoch_dir / f"eval_{real_i:0>5}_target.png"
                     this_target = label_map_to_rgbmask(this_target, label_to_rgb)
                     torchvision.utils.save_image(
                         this_target.to(torch.float), target_img
                     )
+                    # Original image.
                     image_img = epoch_dir / f"eval_{real_i:0>5}_image.png"
                     torchvision.utils.save_image(vinputs[frame_i, :, :], image_img)
 
