@@ -9,9 +9,10 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 import torchvision
+from torch import Tensor
+
 from dataset_generator import load_image_file
 from model import Unet
-from torch import Tensor
 from util import lookup_dtype
 
 if torch.cuda.is_available():
@@ -345,10 +346,16 @@ def batched_inference(model: Unet, tiles: Tensor, batch_size=10) -> Tensor:
 
 
 def run_convert16(args):
-    checkpoint = torch.load(args.checkpoint, weights_only=True)
-    model = Unet(channels_in=3, channels_out=2)
 
     checkpoint = torch.load(args.checkpoint, weights_only=True)
+
+    # Get the out channels from the checkpoint.
+    last_layer = checkpoint["model_state_dict"].get("last_conv.weight")
+    channels_out = 2
+    if last_layer is not None:
+        channels_out = int(last_layer.shape[0])
+
+    model = Unet(channels_in=3, channels_out=channels_out)
 
     model.load_state_dict(checkpoint["model_state_dict"])
     dtype = lookup_dtype(args.dtype)
@@ -367,7 +374,9 @@ def run_convert16(args):
 
         save_file(model.state_dict(), args.output)
     else:
-        raise ValueError(f"Unhandled suffix {args.output.suffix}")
+        raise ValueError(
+            f"Unhandled suffix {args.output.suffix}, make sure output ends in .pth or .safetensors"
+        )
 
 
 def run_inference(args):
