@@ -11,7 +11,11 @@ import torch.nn.functional as F
 import torchvision
 from torch import Tensor
 
-from dataset_generator import load_image_file
+from dataset_generator import (
+    generate_color_palette,
+    label_map_to_rgbmask,
+    load_image_file,
+)
 from model import Unet
 from util import lookup_dtype
 
@@ -23,10 +27,22 @@ else:
     best_device = torch.device("cpu")
 
 
+def create_model_from_checkpoint(checkpoint) -> Unet:
+    # Get the out channels from the checkpoint.
+    last_layer = checkpoint["model_state_dict"].get("last_conv.weight")
+    channels_out = 2
+    if last_layer is not None:
+        channels_out = int(last_layer.shape[0])
+
+    model = Unet(channels_in=3, channels_out=channels_out)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    return model
+
+
 def load_model(path: Path, device=best_device, print_state_dict=False) -> Unet:
-    model = Unet(channels_in=3, channels_out=2)
 
     checkpoint = torch.load(path, weights_only=True)
+    model = create_model_from_checkpoint(checkpoint)
     if print_state_dict:
         for k, v in checkpoint["model_state_dict"].items():
             if isinstance(v, Tensor):
@@ -34,7 +50,6 @@ def load_model(path: Path, device=best_device, print_state_dict=False) -> Unet:
             else:
                 print(f"{k: <30} : {v}")
 
-    model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device)
     return model
 
@@ -238,8 +253,14 @@ def center_inference(model: Unet, image: Tensor, device=best_device):
     image = image[0:3, 64 : (896 + 64), 128:1792].unsqueeze(0)
     with torch.no_grad():
         masked = model(image)
-    print(masked)
-    original_image_size = (2, image_dimensions[0], image_dimensions[1])
+
+    # index_mask = masked.argmax(0)
+    # rgbmask = label_map_to_rgbmask(index_mask, label_to_rgb)
+    original_image_size = (
+        model.channels_out(),
+        image_dimensions[0],
+        image_dimensions[1],
+    )
     mask_image = torch.zeros(
         original_image_size,
         dtype=torch.float,
@@ -247,7 +268,7 @@ def center_inference(model: Unet, image: Tensor, device=best_device):
     )
 
     mask_image[
-        0:2,
+        :,
         64 : (896 + 64),
         128:1792,
     ] = masked
@@ -317,7 +338,10 @@ def write_network_output(
 ):
     mask_img = directory / f"{name_prefix}_mask{name_suffix}.png"
     index_mask = mask_image.argmax(0)
-    torchvision.utils.save_image(index_mask.to(torch.float), mask_img)
+
+    label_to_rgb = generate_color_palette(mask_image.shape[0])
+    rgbmask = label_map_to_rgbmask(index_mask, label_to_rgb)
+    torchvision.utils.save_image(rgbmask.to(torch.float), mask_img)
     # print(f"index_mask: {index_mask.shape}", index_mask)
     values_img = directory / f"{name_prefix}_values{name_suffix}.png"
     t = mask_image[1, :, :]
@@ -349,15 +373,8 @@ def run_convert16(args):
 
     checkpoint = torch.load(args.checkpoint, weights_only=True)
 
-    # Get the out channels from the checkpoint.
-    last_layer = checkpoint["model_state_dict"].get("last_conv.weight")
-    channels_out = 2
-    if last_layer is not None:
-        channels_out = int(last_layer.shape[0])
+    model = create_model_from_checkpoint(checkpoint)
 
-    model = Unet(channels_in=3, channels_out=channels_out)
-
-    model.load_state_dict(checkpoint["model_state_dict"])
     dtype = lookup_dtype(args.dtype)
     model.to(dtype=dtype)
     to_store = {
