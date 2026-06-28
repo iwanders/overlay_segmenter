@@ -305,7 +305,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 [[package]]
 name = "flash_powder"
 version = "0.1.0"
-source = "git+https://github.com/iwanders/flash_powder.git#944f9c4f54c8e83c5114edf7e662f78020b82983"
+source = "git+https://github.com/iwanders/flash_powder.git#ab31f2109a30a9b999b5eb91609f165d707d1b04"
 dependencies = [
  "anyhow",
  "dyn-clone",
@@ -980,7 +980,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 [[package]]
 name = "torch_stable"
 version = "0.1.0"
-source = "git+https://github.com/iwanders/flash_powder.git#944f9c4f54c8e83c5114edf7e662f78020b82983"
+source = "git+https://github.com/iwanders/flash_powder.git#ab31f2109a30a9b999b5eb91609f165d707d1b04"
 dependencies = [
  "anyhow",
  "cc",

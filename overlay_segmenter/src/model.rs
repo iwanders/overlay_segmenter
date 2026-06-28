@@ -127,6 +127,10 @@ impl UNet {
             last_conv,
         })
     }
+
+    pub fn channels_out(&self) -> usize {
+        self.last_conv.weight.size(0)
+    }
 }
 impl nn::Module for UNet {
     fn forward(&self, input: &Ten<'_>) -> Result<Tensor, anyhow::Error> {
