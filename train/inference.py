@@ -383,6 +383,10 @@ def run_convert16(args):
         "loaded_config": checkpoint["loaded_config"],
         "elapsed_time": checkpoint["elapsed_time"],
     }
+    if args.resumable:
+        to_store["optimizer_state_dict"] = checkpoint["optimizer_state_dict"]
+        to_store["epoch"] = checkpoint["epoch"]
+
     if args.output.suffix == ".pth":
         torch.save(to_store, args.output)
         print(f"Saved to {args.output}")
@@ -481,6 +485,12 @@ if __name__ == "__main__":
         type=str,
         default="float16",
         help="Dtype to use, like float16 or float8_e4m3fn, default %(default)s",
+    )
+    parser_convert16.add_argument(
+        "--resumable",
+        default=False,
+        action="store_true",
+        help="Store the optimizer state dict as well, this takes the bulk of the checkpoint, only small size reduction.",
     )
     parser_convert16.add_argument("--output", type=Path, default=Path("/tmp/model.pth"))
     parser_convert16.set_defaults(func=run_convert16)

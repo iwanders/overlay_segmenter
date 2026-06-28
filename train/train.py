@@ -139,7 +139,7 @@ best_vloss = 1_000_000.0
 torch.manual_seed(train_config.model_seed)
 model = Unet(channels_in=3, channels_out=train_config.channel_out)
 
-model.to(device)
+model = model.to(device)
 
 
 # optimizer = torch.optim.SGD(model.parameters(), lr=0.0001, momentum=0.9)
@@ -158,7 +158,6 @@ stats = []
 start_time = time.time()
 if args.load_checkpoint:
     checkpoint = torch.load(args.load_checkpoint, weights_only=True)
-
     model.load_state_dict(checkpoint["model_state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
@@ -170,6 +169,7 @@ if args.load_checkpoint:
 
     epoch_start = checkpoint["epoch"] + 1
 
+model = model.to(torch.float)
 
 if train_config.multi_step_lr:
     scheduler = torch.optim.lr_scheduler.MultiStepLR(
