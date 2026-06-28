@@ -1,14 +1,36 @@
-# TODO:
-# - Modify such that we can handle multiple output classess, from channels of input image.
-# - Ability to collapse channels (such that we can combine classes from input image).
-# - Probably need to handle alpha as well...
-# - What about confidence output?
+# This expects a base_dir like:
+# ├── background
+# │   ├── LevelOne
+# │   │   ├── screenshot_level1_01.png
+# │   │   └── screenshot_level1_02.png
+# │   └── LevelTwo
+# │       ├── screenshot_level2_01.png
+# │       └── screenshot_level2_02.png
+# ├── disturbance
+# │   └── unit_overlay.png
+# └── foreground
+#     ├── labels
+#     │   ├── LevelOne
+#     │   │   └── overlay_level_one.png [^1]
+#     │   └── LevelTwo
+#     │       └── overlay_level_two.png [^2]
+#     └── rgba
+#         ├── LevelOne
+#         │  └──  overlay_level_one.png [^1]
+#         └── LevelTwo
+#             └── overlay_level_two.png [^2]
+#
+# [^1]: Names MUST match
+# [^2]: Names MUST match
+#
+# For the others, naming can be anything. Labels are currently expected as RGB, but only the first channel is used.
 
 train_config:
     learning_rate: 0.00025
     multi_step_lr:
         gamma: 0.2
         milestones: [60, 200, 600, 1200]
+        # My actual training run takes way longer; milestones: [800, 1200, 1400]
     batch_count: 40
     batch_size: 4
     validation_ratio: 0.51
