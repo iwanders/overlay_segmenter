@@ -25,6 +25,9 @@
 #
 # For the others, naming can be anything. Labels are currently expected as RGB, but only the first channel is used.
 
+# Labels and mask is used a bit interchangeably in the parameters and data generator because originally this all
+# supported only 2 classess and everything was just a boolean mask.
+
 train_config:
     # Starting learning rate.
     learning_rate: 0.00025
@@ -185,6 +188,7 @@ data_config:
             blend_alpha:
                 min: 0.3
                 max: 0.5
+            # Use the mask output by this overlay for the final output segmentation labels.
             use_mask: true
         unit_applicator:
             ratio: 1.0
@@ -202,6 +206,7 @@ data_config:
             count:
                 min: 1
                 max: 1
+            # Use the mask output by this overlay for the final output segmentation labels.
             use_mask: true
         text_applicator:
             ratio: 1.0
@@ -236,7 +241,9 @@ data_config:
             dirs: ["."]
             remove_alpha: false
             is_overlay: true
+            # Specifies what alpha threshold to use to determine the mask.
             mask_alpha: 0.5
+            # The label to apply to this alpha mask.
             mask_alpha_label: 128
             base_dir: "{base_dir}/disturbance/"
     # A glyphset is a image holding a font.
