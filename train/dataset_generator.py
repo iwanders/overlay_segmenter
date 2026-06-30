@@ -1342,11 +1342,11 @@ class DataPipeline:
         for name, images in self._input_groups.items():
             if isinstance(images[0], LabelledOverlay):
                 print(
-                    f"Inputs: {name} has {len(images)} labelled images with {images[0].overlay.shape} in {images[0].overlay.dtype} size on {images[0].overlay.device}"
+                    f"Inputs: {name: >20} has {len(images): >4} labelled images with {images[0].overlay.shape} in {images[0].overlay.dtype} size on {images[0].overlay.device}"
                 )
             else:
                 print(
-                    f"Inputs: {name} has {len(images)} images with {images[0].shape} in {images[0].dtype} size on {images[0].device}"
+                    f"Inputs: {name: >20} has {len(images): >4}          images with {images[0].shape} in {images[0].dtype} size on {images[0].device}"
                 )
 
     def load_input_groups(self):

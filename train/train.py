@@ -89,12 +89,18 @@ validation_set = []
 
 train_pipeline = DataPipeline(config_file=args.config_file, full_init=False)
 print(f"train_config: {train_config}")
+print("Training pipeline")
 train_pipeline.print_inputs()
 rng = np.random.default_rng(train_config.generation_seed)
 
 validation_pipeline = train_pipeline.split_validation(
     rng=rng, ratio=train_config.validation_ratio
 )
+print("Validation pipeline")
+validation_pipeline.print_inputs()
+
+
+# Ready everything.
 train_pipeline.post_image_init()
 
 
