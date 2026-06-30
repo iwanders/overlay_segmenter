@@ -15,6 +15,7 @@ fn safetensor_dtype_to_scalar_type(v: safetensors::Dtype) -> fp::DType {
         safetensors::Dtype::F16 => fp::DType::F16,
         safetensors::Dtype::F32 => fp::DType::F32,
         safetensors::Dtype::F64 => fp::DType::F64,
+        safetensors::Dtype::F8_E4M3 => fp::DType::F8_e4m3fn, // or the other one? F8_e4m3fnuz
         _ => todo!("todo handle {v:?}"),
     }
 }
@@ -276,7 +277,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     for argument in std::env::args().skip(2) {
         let img = image::ImageReader::open(&argument)?.decode()?;
         let channels_stacked = image_to_float_tensor(&img, use_cuda)?;
-        let channels_stacked = channels_stacked.to(&fp::DType::F16.into())?;
+        let channels_stacked = channels_stacked.to(&unet.dtype().into())?;
         let dimension = (.., 64..(896 + 64), 128..1792); // 1664x832
         let indexed = channels_stacked.i(dimension.clone())?;
         let image = indexed.unsqueeze(0)?;

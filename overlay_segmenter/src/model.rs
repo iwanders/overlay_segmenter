@@ -131,6 +131,10 @@ impl UNet {
     pub fn channels_out(&self) -> usize {
         self.last_conv.weight.size(0)
     }
+
+    pub fn dtype(&self) -> flash_powder::DType {
+        self.last_conv.weight.dtype()
+    }
 }
 impl nn::Module for UNet {
     fn forward(&self, input: &Ten<'_>) -> Result<Tensor, anyhow::Error> {
