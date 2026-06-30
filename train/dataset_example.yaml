@@ -26,19 +26,28 @@
 # For the others, naming can be anything. Labels are currently expected as RGB, but only the first channel is used.
 
 train_config:
+    # Starting learning rate.
     learning_rate: 0.00025
+    # Parameters passed to MultiStepLR
     multi_step_lr:
         gamma: 0.2
         milestones: [60, 200, 600, 1200]
-        # My actual training run takes way longer; milestones: [800, 1200, 1400]
+        # My actual training run takes way longer; milestones: [1200, 1800, 2200]
+    # How many batches is considered one epoch
     batch_count: 40
+    # Batch size, I didn't find raising this resulted in better results or convergence.
     batch_size: 4
+    # How much of the background images to use for validation only.
     validation_ratio: 0.51
+    # Seed for torch's random seed.
     manual_seed: 3
+    # Seed for the model weights and training.
     model_seed: 4
+    # Seed used by the random number generator passed to the data generator.
     generation_seed: 42
-    # CHannel out needs to map to the number of unique (and consecutive from 0) indices in label_map.
+    # Channel out needs to map to the number of unique (and consecutive from 0) indices in label_map.
     channel_out: 3
+    # Map from the label images' first channel value to the desired class.
     label_map:
         # Background
         0: 0
@@ -49,6 +58,8 @@ train_config:
         # Foreground special2
         64: 2
 
+# Helper to configure the background input handling for all groups.
+# These are kept in RAM because it doesn't fit in VRAM.
 _bg_input: &bg_input
     remove_alpha: true
     base_dir: "{base_dir}/background/"
@@ -64,48 +75,65 @@ _bg_input: &bg_input
 _fg_input: &fg_input
     remove_alpha: false
     is_overlay: true
+    # For the labels, this string is substitued into the 'base_dir' value.
     label_directory_name: labels
+    # For the rgba image, this string is substitued into the 'base_dir' value.
     rgba_directory_name: rgba
     base_dir: "{base_dir}/foreground/{rgba_or_label_directory}"
 
-# Foreground images made using the alpha mask of the rgba image.
+# Foreground images made using the alpha mask of the rgba image, the above fg input assumes that
+# there will be correct label images.
 _fg_input_no_labels: &fg_input_disabled
     remove_alpha: false
     is_overlay: true
     mask_alpha: 0.5
     base_dir: "{base_dir}/foreground/rgba/"
 
+# The actual data configuration.
 data_config:
+    # Base dir which holds the dataset.
     base_dir: "../../dataset_example/"
+    # Post processing actions by name.
     post_process:
+        # Base blur configuration, not used by itself.
         fine_blur: &blur_cfg
             function: blur
             config:
+                # this is the min-max value of gaussion blur.
                 min: 0.0
                 max: 3.0
-            ratio: 0.0
+            ratio: 1.0
+        # Jpeg postprocessing configuration, not used by itself.
         jpeg: &jpeg_cfg
             function: jpg
             config:
+                # This is the quality, uniformly sampled between min and max.
                 min: 50
                 max: 100
-            ratio: 0.0
+            ratio: 1.0
+        # Resize roundtrip configuration, happens 20% of the time.
         resize_roundtrip: &resize_config
             function: resize_roundtrip
             config:
+                # Scaling factor is sampled uniformly from the sequence.
                 factors: [2, 4]
             ratio: 0.2
+        # A combined postprocessor that calls two other functions.
         fine_blur_jpg:
             function: combined
             config:
+                # This forces the function list to have its ratio overwritten to 1.0
+                # This ensures that both the blur and jpeg compression happen at the same time.
                 child_ratio: 1.0
                 functions:
                     - <<: *blur_cfg
                     - <<: *jpeg_cfg
-            ratio: 0.0
+            ratio: 0.1
+        # For half the images, flip it horizontally.
         augment_flip_horizontal:
             function: flip_horizontal
             ratio: 0.5
+        # A HSV postprocessing step that randomly picks the color of text.
         text_color: &text_color
             function: hsv_transform
             config:
@@ -116,6 +144,7 @@ data_config:
                     min: -0.5
                     max: 0.5
             ratio: 1.0
+        # A channel clamp postprocessing, to ensure colors don't get too bright in the fonts.
         brightness_clamp: &brightness_clamp
             function: channel_clamp
             config:
@@ -124,6 +153,7 @@ data_config:
                         min: 0.2
                         max: 0.3
             ratio: 1.0
+        # A combined postprocessor that applies the text color and clamp.
         text_color_brightness:
             function: combined
             config:
@@ -133,11 +163,17 @@ data_config:
                     - <<: *brightness_clamp
             ratio: 1.0
 
+    # Named image applicators, these do the position sampling, any postprocessing steps on their individual
+    # to be stamped image and then apply the image to the output being created.
     image_applicators:
         bg_applicator:
+            # Always apply this.
             ratio: 1.0
+            # Mean of 0.5 is the center of the image, sigma is multiplied by the width to obtain the stddev in pixels.
             position_x: { mean: 0.5, sigma: 0.15, by_self: true }
+            # Mean of 0.5 is the center of the image, sigma is multiplied by the height to obtain the stddev in pixels.
             position_y: { mean: 0.5, sigma: 0.15, by_self: true }
+            # Crop a section of 256x256 out of the image.
             crop: [256, 256]
             post_process_image:
                 - augment_flip_horizontal
@@ -145,6 +181,7 @@ data_config:
             ratio: 1.0
             position_x: { mean: 0.5, sigma: 0.4, by_self: true }
             position_y: { mean: 0.5, sigma: 0.4, by_self: true }
+            # Blend the foreground with an alpha of 0.3 - 0.5
             blend_alpha:
                 min: 0.3
                 max: 0.5
@@ -152,6 +189,7 @@ data_config:
             ratio: 1.0
             position_x: { mean: 0.5, sigma: 0.4, by_self: false }
             position_y: { mean: 0.5, sigma: 0.4, by_self: false }
+            # Uniformly sampled count, this is the number of times this applicator is applied.
             count:
                 min: 0
                 max: 3
@@ -162,9 +200,11 @@ data_config:
             count:
                 min: 4
                 max: 4
+            # Denote that this applicator may not overlap with itself, it may overlap with others.
             overlap: false
             pre_process_image:
                 - text_color_brightness
+    # Image groups by name, with their respective load configuration.
     image_groups:
         bg_LevelOne:
             dirs: [LevelOne]
@@ -182,34 +222,53 @@ data_config:
             dirs: ["."]
             remove_alpha: false
             base_dir: "{base_dir}/disturbance/"
+    # A glyphset is a image holding a font.
     glyphsets:
         example_glyphset:
             config: ./example_glyphset/test_font.yaml
+    # And text groups by name.
     text_groups:
         overlay_text:
+            # Which glyph set it uses.
             glyph_set: example_glyphset
+            # The canvas size is the rectangular backdrop size.
             canvas_height: 30
+            # Baseline is the font baseline in the backdrop.
             canvas_baseline: 15
+            # Margin on left and right in pixels.
             margin_left: 5
             margin_right: 15
+            # Color of the backdrop.
             background_color_rgba_u8: [128, 0, 0, 128]
+            # Silently ignore missing characters.
             skip_missing_characters: false
+            # Text could be lines from a file:
             #text_lines: "strings.txt"
+            # Or just an inline list;
             text_lines:
                 - abb
                 - abc
                 - pap
                 - pac
 
+    # Then finally, we can combine all of this into the generator.
     generator:
+        # Specify its inputs.
         - inputs:
+              # This is (applicator_name, image_group_name)
               - [bg_applicator, "bg_{label}"]
               - [fg_applicator, "fg_{label}"]
               - [unit_applicator, map_units]
               - [text_applicator, overlay_text]
+          # This key creates a for loop over the entries, iterating over the values in the 'for_input_keys' map
+          # substituting the key in the 'image_group_name' from 'inputs'. This prevents having a large amount of entries
+          # in the generator list that only differ in image_group_name.
+          # This results in {bg_LevelOne, fg_LevelOne} for the first pass and {bg_LevelTwo, fg_LevelTwo} for the second.
           for_input_keys:
               label: [LevelOne, LevelTwo]
+          # This specifies which layer in the stack provides the mask, or the segmentation labels.
           mask_layer: 1
+          # This specifies the postprocessing functions applied to the created rgb image.
           post_process:
               - resize_roundtrip
               - fine_blur

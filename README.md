@@ -34,8 +34,7 @@ Additionally, disturbance images may be added, or text in a semi-transparent rec
 Finally, there are several post-processing steps that happen on the rgb image, like a downscale-upscale roundtrip, jpeg compression, gaussian blurs or a combination of any of these.
 
 The actual pipeline can be configured in various ways and with multiple steps.
-The paragraph above describes the [dataset_example.yaml](./train/dataset_example.yaml), which is merely an example file.
-
+The paragraph above describes the [dataset_example.yaml](./train/dataset_example.yaml), which is an example file that documents the parameters.
 My actual training file is more involved, with a much longer list of image groups, and more disturbances, but the same process & steps.
 
 ## Cheatsheet of commands
