@@ -185,6 +185,7 @@ data_config:
             blend_alpha:
                 min: 0.3
                 max: 0.5
+            use_mask: true
         unit_applicator:
             ratio: 1.0
             position_x: { mean: 0.5, sigma: 0.4, by_self: false }
@@ -193,6 +194,15 @@ data_config:
             count:
                 min: 0
                 max: 3
+        unit_applicator_with_mask:
+            ratio: 1.0
+            position_x: { mean: 0.5, sigma: 0.4, by_self: false }
+            position_y: { mean: 0.5, sigma: 0.4, by_self: false }
+            # Uniformly sampled count, this is the number of times this applicator is applied.
+            count:
+                min: 1
+                max: 1
+            use_mask: true
         text_applicator:
             ratio: 1.0
             position_x: { mean: 0.5, sigma: 0.1, by_self: false }
@@ -221,6 +231,13 @@ data_config:
         map_units:
             dirs: ["."]
             remove_alpha: false
+            base_dir: "{base_dir}/disturbance/"
+        map_units_labelled:
+            dirs: ["."]
+            remove_alpha: false
+            is_overlay: true
+            mask_alpha: 0.5
+            mask_alpha_label: 128
             base_dir: "{base_dir}/disturbance/"
     # A glyphset is a image holding a font.
     glyphsets:
@@ -256,18 +273,18 @@ data_config:
         # Specify its inputs.
         - inputs:
               # This is (applicator_name, image_group_name)
+              # The first applicator MUST specify a crop area to determine the tile size.
               - [bg_applicator, "bg_{label}"]
               - [fg_applicator, "fg_{label}"]
               - [unit_applicator, map_units]
               - [text_applicator, overlay_text]
+              - [unit_applicator_with_mask, map_units_labelled]
           # This key creates a for loop over the entries, iterating over the values in the 'for_input_keys' map
           # substituting the key in the 'image_group_name' from 'inputs'. This prevents having a large amount of entries
           # in the generator list that only differ in image_group_name.
           # This results in {bg_LevelOne, fg_LevelOne} for the first pass and {bg_LevelTwo, fg_LevelTwo} for the second.
           for_input_keys:
               label: [LevelOne, LevelTwo]
-          # This specifies which layer in the stack provides the mask, or the segmentation labels.
-          mask_layer: 1
           # This specifies the postprocessing functions applied to the created rgb image.
           post_process:
               - resize_roundtrip

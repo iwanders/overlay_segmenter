@@ -648,6 +648,7 @@ class DataInput(BaseModel):
     label_directory_name: str | None = None
     rgba_directory_name: str | None = None
     mask_alpha: float = 0.5
+    mask_alpha_label: int = 255
 
 
 class ImageApplicatorConfig(BaseModel):
@@ -668,6 +669,9 @@ class ImageApplicatorConfig(BaseModel):
 
     pre_process_image: list[str] = []
     post_process_image: list[str] = []
+
+    # Whether this applicator's mask is used as a mask.
+    use_mask: bool = False
 
 
 class TextGenerationConfig(BaseModel):
@@ -991,9 +995,7 @@ class DataStack(BaseModel):
     # List of inputs, (key of DataApplicator, key of DataInput)
     inputs: list[tuple[str, str]]
     for_input_keys: dict[str, list[str]] = {"__dumy__": ["__DUMMY__"]}
-    # The layer that will make the mask. This is only used if an explicit mask is not provided through the
-    # label_directory_name system.
-    mask_layer: int = 1
+
     # List of postprocessing actions, mapping to DataPostprocess
     post_process: list[str] = []
 
@@ -1041,6 +1043,9 @@ class ImageApplicator:
 
     def ratio(self) -> float:
         return self._config.ratio
+
+    def use_mask(self) -> bool:
+        return self._config.use_mask
 
     def _get_count(self, rng: np.random.Generator) -> int:
         if type(self._config.count) is int:
@@ -1243,8 +1248,19 @@ class DataGenerator:
             if rng.random() >= applicator.ratio():
                 continue
 
-            if layer == self._config.mask_layer:
-                canvas, mask = applicator.apply(rng, canvas, images, return_mask=True)
+            if applicator.use_mask():
+                canvas, new_mask = applicator.apply(
+                    rng, canvas, images, return_mask=True
+                )
+
+                if mask is None:
+                    mask = new_mask
+                elif new_mask is not None:
+                    # Actually apply the mask, by copying over values that are non zero.
+
+                    non_zero = new_mask != 0
+                    mask[non_zero] = new_mask[non_zero]
+
             else:
                 canvas, _ = applicator.apply(rng, canvas, images, return_mask=False)
 
@@ -1368,7 +1384,7 @@ class DataPipeline:
                     masks = []
                     for t in this_set:
                         labels = t[3, :, :] >= (input_group.mask_alpha * 255)
-                        labels = labels.to(torch.int64) * 255
+                        labels = labels.to(torch.int64) * input_group.mask_alpha_label
                         masks.append(labels)
                     this_set = [
                         LabelledOverlay(label=label, overlay=overlay)
