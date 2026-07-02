@@ -12,6 +12,7 @@ The output of the model shown here outputs five classess to represent the variou
 The model does well because it's trained on randomly created data that's postprocessed to be compressed, resized and blurred images.
 It is also able to see through the [text](./doc/example_screenshot_text_1776131289.png) backdrop pretty well.
 
+The author gratefully acknowledges [@nlunscher](https://github.com/nlunscher) for the numerous helpful discussions regarding this project.
 
 ## Inference using Rust
 The [overlay_segmenter](./overlay_segmenter) Rust crate holds the code to run inference, this does still require LibTorch which it finds through the sourced venv.
@@ -57,3 +58,8 @@ Convert checkpoint to safetensors for usage from Rust, by default with fp16:
 ```
 ./inference.py convert -c <checkpoint> --output /tmp/unet.safetensors
 ```
+
+--- 
+
+License is [BSD-3-Clause](./LICENSE).
+
