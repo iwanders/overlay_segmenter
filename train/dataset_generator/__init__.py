@@ -2,7 +2,6 @@
 #
 
 import colorsys
-import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,24 +16,18 @@ from torch import Tensor
 
 from letter_support import Glyphset
 from util import (
-    load_image_file,
-    load_image_file_u8,
     lookup_device,
 )
 
-from .loader import DataLoader, ImageLoader
+from .loader import ImageLoader
 from .model import (
-    CollectionPair,
-    DataGenerationSpec,
     DataInput,
-    DataPair,
     DataPostprocess,
     DistributionNormalInt,
     DistributionUniformFloat,
     DistributionUniformInt,
 )
 from .post_process import PostProcess
-from .rng_util import rng_choice, rng_shuffle
 
 
 def clamp(value, min_val, max_val):
@@ -217,31 +210,6 @@ class DynamicGenerator:
                 yield (d, m)
 
         return gen()
-
-
-def test_image_overlay():
-    import sys
-
-    def d(b_x, b_y, f_x, f_y):
-        background = torch.ones((3, 128 * 1, 128 * 1), dtype=torch.float) * 0.2
-        foreground = torch.ones((3, 32, 32), dtype=torch.float)
-
-        r = DatasetGenerator.image_overlay(
-            background, foreground, b_x=b_x, b_y=b_y, f_x=f_x, f_y=f_y
-        )
-        torchvision.utils.save_image(
-            r, f"/tmp/canvas_overlay_{b_x}_{b_y}__{f_x}_{f_y}.png"
-        )
-
-    d(b_x=64, b_y=64, f_x=32, f_y=32)
-    d(b_x=64, b_y=64, f_x=16, f_y=32)
-    d(b_x=64, b_y=64, f_x=32, f_y=16)
-    d(b_x=90, b_y=64, f_x=32, f_y=32)
-    # d(b_x=0, b_y=0, f_x=32, f_y=64)
-    # d(b_x=64, b_y=64, f_x=96, f_y=96)
-    # d(b_x=0, b_y=0, f_x=0, f_y=0)
-
-    sys.exit(1)
 
 
 class ImageApplicatorConfig(BaseModel):
@@ -470,6 +438,7 @@ class ImageApplicator:
         overlay_source: OverlaySource,
         return_mask: bool = False,
     ) -> tuple[Tensor, Tensor | None]:
+
         canvas = canvas
         mask = None
         placed = []

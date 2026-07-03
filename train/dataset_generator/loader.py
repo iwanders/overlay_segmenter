@@ -28,51 +28,6 @@ class TensorNameTracker:
 tensor_tracker = TensorNameTracker()
 
 
-class DataLoader:
-    def __init__(self, config_file):
-        with open(config_file) as f:
-            d = yaml.safe_load(f)
-        self._spec = DataGenerationSpec.model_validate(d)
-        self._bg_images: dict[str, list[Tensor]] = {}
-        self._fg_images: dict[str, list[Tensor]] = {}
-        self.load_images()
-
-    def load_images(self):
-        bg_dir = Path(self._spec.background_dir)
-        fg_dir = Path(self._spec.foreground_dir)
-
-        def load_datapair(data_pairs):
-            for fg_subdir in data_pairs.foreground_subdir:
-                if fg_subdir not in self._fg_images:
-                    self._fg_images[fg_subdir] = ImageLoader.foreground_loader(
-                        fg_dir / fg_subdir
-                    )
-
-            for bg_subdir in data_pairs.background_subdir:
-                if bg_subdir not in self._bg_images:
-                    self._bg_images[bg_subdir] = ImageLoader.background_loader(
-                        bg_dir / bg_subdir
-                    )
-
-        for data_pair in self._spec.data_pair:
-            load_datapair(data_pair)
-
-    def generate_data_pairs(self) -> list[CollectionPair]:
-        # This is where we actually make the collection that can be trained on.
-        r = []
-        for data_pairs in self._spec.data_pair:
-            foreground = []
-            background = []
-            for fg_subdir in data_pairs.foreground_subdir:
-                foreground.extend(self._fg_images[fg_subdir])
-            for bg_subdir in data_pairs.background_subdir:
-                background.extend(self._bg_images[bg_subdir])
-            p = CollectionPair(foreground=foreground, background=background)
-            r.append(p)
-
-        return r
-
-
 class ImageLoader:
     def __init__(
         self,
