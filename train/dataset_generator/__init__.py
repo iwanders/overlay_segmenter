@@ -102,299 +102,101 @@ class OverlayResult:
         return Rect(x=self.composite_x, y=self.composite_y)
 
 
-class DatasetGenerator:
-    """
-        Main data set generator.
+def image_overlay(
+    background,
+    foreground,
+    b_x,
+    b_y,
+    f_x,
+    f_y,
+    return_overlay=False,
+    dtype=torch.float,
+) -> OverlayResult:
+    # We've selected the position in the canvas, and the position in the overlay.
+    # next, we have to determine the rectangle in which the bounds overlap.
+    # We will place the overlay coordinate onto the canvas coordinate.
 
-        Instead of background and foreground images and allowing freely mixing each, it now takes:
-            data: list[CollectionPair]
+    # Calculate the overlapping region
+    bg_h, bg_w = background.shape[-2], background.shape[-1]
+    fg_h, fg_w = foreground.shape[-2], foreground.shape[-1]
 
+    b_x = int(b_x - bg_w / 2)
+    b_y = int(b_y - bg_h / 2)
+    f_x = int(f_x - bg_w / 2)
+    f_y = int(f_y - bg_h / 2)
 
-    class CollectionPair(BaseModel):
-        model_config = ConfigDict(arbitrary_types_allowed=True)
-        foreground: list[Tensor]
-        background: list[Tensor]
-    """
+    # x_offset and y_offset is the top left corner of the overlay in bg coordinates.
+    x_offset = int(b_x - f_x)
+    y_offset = int(b_y - f_y)
 
-    def __init__(
-        self,
-        data_pairs: list[CollectionPair],
-        device="cpu",
-        batch_size: int | None = None,
-        batch_count: int | None = None,
-        rng: np.random.Generator | None = None,
-        tile_size=(256, 256),
-        alpha_factor=1.0,
-    ):
-        self._device = device
-        self._batch_size: int | None = batch_size
-        self._batch_count: int | None = batch_count
+    # x_offset = 5
+    # # y_offset = 15
+    # print("x_offset: ", x_offset)
+    # print("y_offset: ", y_offset)
 
-        # prepare data pairs for sampling with background first, second pair mapping to the foreground options.
-        self._sample_entries: list[tuple[Tensor, list[Tensor]]] = []
-        for data_pair in data_pairs:
-            for bg in data_pair.background:
-                if len(data_pair.foreground) == 0:
-                    raise ValueError(
-                        "Foreground count is zero for bg: ",
-                        tensor_tracker.get_name(bg),
-                    )
-                self._sample_entries.append((bg, data_pair.foreground))
-        self._rng = rng
-        self._tile_size = tile_size
-        self._alpha_factor = alpha_factor
-        if self._sample_entries:
-            self._sample_entries = rng_shuffle(self._rng, self._sample_entries)
+    # Determine intersection coordinates (handles boundary crossing)
+    y1 = max(0, y_offset)
+    y2 = min(bg_h, y_offset + fg_h)
+    x1 = max(0, x_offset)
+    x2 = min(bg_w, x_offset + fg_w)
 
-    def split_out_validation(
-        self,
-        rng,
-        ratio: float = 0.1,
-    ) -> "DatasetGenerator":
-        validation = DatasetGenerator([], rng=rng)
-        validation._device = self._device
-        validation._batch_size = self._batch_size
-        validation._batch_count = self._batch_count
-        validation._tile_size = self._tile_size
-        validation._alpha_factor = self._alpha_factor
-        total_bg = len(self._sample_entries)
-        validation_bg_split = int(total_bg * ratio)
-        validation_entries = self._sample_entries[0:validation_bg_split]
-        train_entries = self._sample_entries[validation_bg_split + 1 :]
-        validation._sample_entries = validation_entries
-        self._sample_entries = train_entries
-        return validation
+    # Corresponding coordinates in the foreground image
+    fg_y1 = max(0, -y_offset)
+    fg_y2 = fg_y1 + (y2 - y1)
+    fg_x1 = max(0, -x_offset)
+    fg_x2 = fg_x1 + (x2 - x1)
 
-    def debug_dump(self):
-        output = Path("/tmp/debug_dump")
-        output.mkdir(exist_ok=True)
+    mask = None
+    if return_overlay:
+        mask = torch.zeros(
+            background.shape,
+            dtype=dtype,
+        )
 
-        print("Generating")
-        start = time.time()
-        generated = [
-            (
-                augment_jpg_roundtrip(a),
-                b,
-            )
-            for a, b in self.generate(count=10)
-        ]
-        print("done generating")
-        print(f"took {time.time() - start} s")
-
-        # for i, img in enumerate(self._background_images):
-        #    torchvision.utils.save_image(img, output / f"background_{i}.png")
-        # for i, img in enumerate(self._foreground_images):
-        #    torchvision.utils.save_image(img, output / f"foreground_{i}.png")
-
-        for i, (sample_img, sample_mask) in enumerate(generated):
-            torchvision.utils.save_image(sample_img, output / f"sample_{i}_img.png")
-            torchvision.utils.save_image(
-                sample_mask.to(torch.float), output / f"sample_{i}_mask.png"
-            )
-
-    @staticmethod
-    def sample_tile(img, tile_size, rng):
-        # channels, height, width,
-        height = img.shape[1]
-        width = img.shape[2]
-
-        if width < tile_size[1] or height < tile_size[0]:
-            padder = torchvision.transforms.Pad(
-                (max((tile_size[1] - width), 0), max((tile_size[0] - height), 0)),
-                fill=0,
-                padding_mode="constant",
-            )
-            img = padder(img)
-            width = img.shape[1]
-            height = img.shape[2]
-        # Sample mostly from the center, but corners are possible.
-        x = rng.normal(loc=(width / 2.0) - (tile_size[0] / 2), scale=width / 4.0)
-        y = rng.normal(loc=(height / 2.0) - (tile_size[1] / 2), scale=height / 4.0)
-        # kwargs["crop_size"] = (1700, 825)
-        # x = (width / 2.0) - (tile_size[0] / 2)
-        # y = (height / 2.0) - (tile_size[1] / 2)
-        # Int cast and clamp x and y such that the range falls within the image.
-        x = clamp(int(x), 0, width - tile_size[0])
-        y = clamp(int(y), 0, height - tile_size[1])
-        # print(x, y, width, height)
-
-        return img[:, y : y + tile_size[1], x : x + tile_size[0]]
-
-    @staticmethod
-    def image_overlay(
-        background,
-        foreground,
-        b_x,
-        b_y,
-        f_x,
-        f_y,
-        return_overlay=False,
-        dtype=torch.float,
-    ) -> OverlayResult:
-        # We've selected the position in the canvas, and the position in the overlay.
-        # next, we have to determine the rectangle in which the bounds overlap.
-        # We will place the overlay coordinate onto the canvas coordinate.
-
-        # Calculate the overlapping region
-        bg_h, bg_w = background.shape[-2], background.shape[-1]
-        fg_h, fg_w = foreground.shape[-2], foreground.shape[-1]
-
-        b_x = int(b_x - bg_w / 2)
-        b_y = int(b_y - bg_h / 2)
-        f_x = int(f_x - bg_w / 2)
-        f_y = int(f_y - bg_h / 2)
-
-        # x_offset and y_offset is the top left corner of the overlay in bg coordinates.
-        x_offset = int(b_x - f_x)
-        y_offset = int(b_y - f_y)
-
-        # x_offset = 5
-        # # y_offset = 15
-        # print("x_offset: ", x_offset)
-        # print("y_offset: ", y_offset)
-
-        # Determine intersection coordinates (handles boundary crossing)
-        y1 = max(0, y_offset)
-        y2 = min(bg_h, y_offset + fg_h)
-        x1 = max(0, x_offset)
-        x2 = min(bg_w, x_offset + fg_w)
-
-        # Corresponding coordinates in the foreground image
-        fg_y1 = max(0, -y_offset)
-        fg_y2 = fg_y1 + (y2 - y1)
-        fg_x1 = max(0, -x_offset)
-        fg_x2 = fg_x1 + (x2 - x1)
-
-        mask = None
-        if return_overlay:
-            mask = torch.zeros(
-                background.shape,
-                dtype=dtype,
-            )
-
-        # Handle two situations where the intersection is disjoint; ie; the overlay is outside of the bg.
-        if y2 < y1 or x2 < x1:
-            return OverlayResult(
-                composite=background,
-                overlaid=mask,
-                composite_x=(0, 0),
-                composite_y=(0, 0),
-            )
-
-        if fg_y2 < fg_y1 or fg_x2 < fg_x1:
-            return OverlayResult(
-                composite=background,
-                overlaid=mask,
-                composite_x=(0, 0),
-                composite_y=(0, 0),
-            )
-
-        # Apply the overlay
-        if foreground.shape[0] == 4:
-            background[:, y1:y2, x1:x2] = foreground[:, fg_y1:fg_y2, fg_x1:fg_x2]
-        else:
-            if dtype == torch.float:
-                background[0:3, y1:y2, x1:x2] = foreground[
-                    0:3, fg_y1:fg_y2, fg_x1:fg_x2
-                ]
-                background[3, :, :] = 1.0
-            elif dtype == torch.uint8:
-                background[0:3, y1:y2, x1:x2] = foreground[
-                    0:3, fg_y1:fg_y2, fg_x1:fg_x2
-                ]
-                background[3, :, :] = 255
-            elif dtype == torch.int64:
-                single_channel = foreground[fg_y1:fg_y2, fg_x1:fg_x2]
-                indices = single_channel != 0
-                background[y1:y2, x1:x2][indices] = single_channel[indices]
-
-            else:
-                raise NotImplementedError("dtype not supported")
-
-        if return_overlay:
-            mask[:, y1:y2, x1:x2] = foreground[:, fg_y1:fg_y2, fg_x1:fg_x2]
-
+    # Handle two situations where the intersection is disjoint; ie; the overlay is outside of the bg.
+    if y2 < y1 or x2 < x1:
         return OverlayResult(
             composite=background,
             overlaid=mask,
-            composite_x=(x1, x2),
-            composite_y=(y1, y2),
+            composite_x=(0, 0),
+            composite_y=(0, 0),
         )
 
-    @staticmethod
-    def stamp_tile(
-        rng,
-        tile_size,
-        overlay,
-    ):
-        # channels, height, width,
-        # Sample mostly from the center, but corners are possible.
-        o_height, o_width = overlay.shape[1:]
-        c_height, c_width = tile_size
-        scale_divisor = 6.0
-        o_x = int(rng.normal(loc=o_width / 2, scale=o_width / scale_divisor))
-        o_y = int(rng.normal(loc=o_height / 2, scale=o_height / scale_divisor))
-        c_x = int(rng.normal(loc=c_width / 2, scale=c_width / scale_divisor))
-        c_y = int(rng.normal(loc=c_height / 2, scale=c_height / scale_divisor))
-        canvas = torch.zeros((4, tile_size[0], tile_size[1]), dtype=torch.float)
+    if fg_y2 < fg_y1 or fg_x2 < fg_x1:
+        return OverlayResult(
+            composite=background,
+            overlaid=mask,
+            composite_x=(0, 0),
+            composite_y=(0, 0),
+        )
 
-        return DatasetGenerator.image_overlay(canvas, overlay, c_x, c_y, o_x, o_y)
+    # Apply the overlay
+    if foreground.shape[0] == 4:
+        background[:, y1:y2, x1:x2] = foreground[:, fg_y1:fg_y2, fg_x1:fg_x2]
+    else:
+        if dtype == torch.float:
+            background[0:3, y1:y2, x1:x2] = foreground[0:3, fg_y1:fg_y2, fg_x1:fg_x2]
+            background[3, :, :] = 1.0
+        elif dtype == torch.uint8:
+            background[0:3, y1:y2, x1:x2] = foreground[0:3, fg_y1:fg_y2, fg_x1:fg_x2]
+            background[3, :, :] = 255
+        elif dtype == torch.int64:
+            single_channel = foreground[fg_y1:fg_y2, fg_x1:fg_x2]
+            indices = single_channel != 0
+            background[y1:y2, x1:x2][indices] = single_channel[indices]
 
-    @staticmethod
-    def create_tile(
-        rng, bg: Tensor, fg: Tensor, alpha_factor: float = 1.0, tile_size=256
-    ):
-        # Next, sample a tile from this.
-        bg_tile = DatasetGenerator.sample_tile(bg, tile_size=tile_size, rng=rng).clone()
-        # fg_tile = DatasetGenerator.sample_tile(fg, tile_size=tile_size, rng=rng)
-        fg_tile = DatasetGenerator.stamp_tile(rng=rng, tile_size=tile_size, overlay=fg)
+        else:
+            raise NotImplementedError("dtype not supported")
 
-        fg_rgb = fg_tile[:3]
-        fg_alpha = fg_tile[3:]  # (1, H, W)
+    if return_overlay:
+        mask[:, y1:y2, x1:x2] = foreground[:, fg_y1:fg_y2, fg_x1:fg_x2]
 
-        # Now, we perform the blit to create the combined texture....
-        combined = alpha_blend(fg_rgb, bg_tile, alpha=fg_alpha * alpha_factor)
-        mask = fg_alpha >= 0.5
-        # combined = torch.from_numpy(combined)
-        mask = mask.to(torch.int64).squeeze()
-        # combined = augment_jpg_roundtrip(combined, quality=10)
-        return (combined, mask)
-
-    def generate(self, count=1):
-        results = []
-
-        def create_tile(rng):
-            (bg, fg_options) = rng_choice(rng, self._sample_entries)
-            fg = rng_choice(rng, fg_options)
-
-            (img, mask) = DatasetGenerator.create_tile(
-                rng=self._rng,
-                bg=bg,
-                fg=fg,
-                alpha_factor=self._alpha_factor,
-                tile_size=self._tile_size,
-            )
-            # img = augment_jpg_roundtrip(img)
-            return (img, mask)
-
-        # with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        #     rngs = [np.random.default_rng(seed=seed + t) for t in range(count)]
-        #     results = list(executor.map(create_tile, rngs))
-        results = [create_tile(self._rng) for t in range(count)]
-
-        return results
-
-    def batch_generator(self) -> Any:
-        def batch_gen(batch_count):
-            return self.generate(batch_count)
-
-        return batch_gen
-
-    def set_batch_size(self, batch_size):
-        self._batch_size = batch_size
-
-    def set_batch_count(self, batch_count):
-        self._batch_count = batch_count
+    return OverlayResult(
+        composite=background,
+        overlaid=mask,
+        composite_x=(x1, x2),
+        composite_y=(y1, y2),
+    )
 
 
 class DynamicGenerator:
@@ -740,7 +542,7 @@ class ImageApplicator:
                 if not positioned:
                     print("Failed to position because of overlap")
 
-            overlay_result = DatasetGenerator.image_overlay(
+            overlay_result = image_overlay(
                 sub_canvas,
                 overlay,
                 c_x,
@@ -763,7 +565,7 @@ class ImageApplicator:
                         dtype=torch.int64,
                         device=self._device,
                     )
-                    mask_result = DatasetGenerator.image_overlay(
+                    mask_result = image_overlay(
                         mask_canvas,
                         raw_mask,
                         c_x,
