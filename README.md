@@ -33,6 +33,7 @@ Same for the overlay, it is randomly selected and a random (uncorrelated) positi
 The desired output values are created from the overlay image's segmentation labels.
 Additionally, disturbance images may be added, or text in a semi-transparent rectangle.
 Finally, there are several post-processing steps that happen on the rgb image, like a downscale-upscale roundtrip, jpeg compression, gaussian blurs or a combination of any of these.
+Any random decisions are based on the random generator that's passed in, seeded from the yaml file to ensure identical training & validation data is generated for consecutive runs.
 
 The actual pipeline can be configured in various ways and with multiple steps.
 The paragraph above describes the [dataset_example.yaml](./train/dataset_example.yaml), which is an example file that documents the parameters.

@@ -35,12 +35,14 @@ train_config:
     multi_step_lr:
         gamma: 0.2
         milestones: [60, 200, 600, 1200]
-        # My actual training run takes way longer; milestones: [1200, 1800, 2200]
+        # My actual training run takes way longer; milestones: [1600, 2000, 2400]
     # How many batches is considered one epoch
     batch_count: 40
     # Batch size, I didn't find raising this resulted in better results or convergence.
     batch_size: 4
     # How much of the background images to use for validation only.
+    # This is currently 51 such that this example works with just two images as per the 'tree' at the top.
+    # In my actualy run this is only 5%
     validation_ratio: 0.51
     # Seed for torch's random seed.
     manual_seed: 3

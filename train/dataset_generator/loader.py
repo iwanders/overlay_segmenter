@@ -8,7 +8,6 @@ from torch import Tensor
 from util import (
     load_image_file,
     load_image_file_u8,
-    lookup_device,
 )
 
 from .model import CollectionPair, DataGenerationSpec
