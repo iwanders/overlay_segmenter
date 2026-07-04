@@ -56,7 +56,7 @@ def color_histogram(image_tensor: Tensor) -> Tensor:
     return histogram
 
 
-# Slow, but strictly equivalent.
+# This function isn't fast, but it is exactly correct.
 def extract_alpha_mask_integer(
     composite: Tensor, background_color: Tensor, foreground_color: Tensor
 ) -> Tensor:
@@ -167,13 +167,28 @@ def run_extract(args):
         color_tensor = background_color.detach().clone().view(1, 1, 3).to(torch.uint8)
         solid_background = color_tensor.expand(height, width, 3).clone()
         background_by_pixel = solid_background.permute([2, 0, 1])
-        background_img = torchvision.transforms.functional.to_pil_image(
+        recreation = torchvision.transforms.functional.to_pil_image(
             background_by_pixel, mode=None
         )
-        background_img.paste(pil_fg, (0, 0), pil_fg)
-        background_img.save(args.output / f"{basename}_recreated.png")
+        recreation.paste(pil_fg, (0, 0), pil_fg)
+        recreation.save(args.output / f"{basename}_recreated.png")
 
-    pass
+        # Calculate the number of rgb points error.
+        recreation_tensor = torchvision.transforms.functional.pil_to_tensor(
+            recreation
+        ).to(torch.int64)
+        orig_tensor = rgb.to(torch.int64)
+        diff = orig_tensor - recreation_tensor
+        min, max = diff.min(), diff.max()
+        sum_abs = diff.abs().sum()
+        per_pixel = sum_abs / (height * width)
+        print(
+            f"  Min pixel error: {min}, max pixel error: {max}, total rgb values off: {sum_abs}, per pixel: {per_pixel}"
+        )
+        torchvision.utils.save_image(
+            diff.to(torch.float), args.output / f"{basename}_diff_normalized.png"
+        )
+        # Off by -1 or 1... and some minor things.
 
 
 if __name__ == "__main__":
@@ -184,14 +199,14 @@ if __name__ == "__main__":
     parser_extract = subparsers.add_parser(
         "extract", help="extract overlay from a solid background."
     )
-    parser_extract.add_argument(
+    _ = parser_extract.add_argument(
         "-b",
         "--background-color-index",
         default=0,
         type=int,
         help="Peak in the unique color histogram to use as the backgorund pixel",
     )
-    parser_extract.add_argument(
+    _ = parser_extract.add_argument(
         "-f",
         "--foreground-color-index",
         default=1,
@@ -203,7 +218,6 @@ if __name__ == "__main__":
     _ = parser_extract.add_argument(
         "-o", "--output", type=Path, required=False, default="/tmp/"
     )
-
     parser_extract.set_defaults(func=run_extract)
 
     args = parser.parse_args()
