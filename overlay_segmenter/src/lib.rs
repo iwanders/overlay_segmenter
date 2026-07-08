@@ -1,112 +1,11 @@
 use anyhow::bail;
 use flash_powder as fp;
 use flash_powder::{Ten, Tensor, nn, prelude::*};
+use flash_powder_image::{TensorFromImage, TensorToImage};
 use nn::module::Module;
 
 pub mod model;
 use model::{UNet, UNetOptions};
-
-// -------------- image::DynamicImage to fp::Tensor --------------
-/// Convert dynamic image into [1, 3, h, w] Tensor as floats.
-fn image_to_float_tensor(
-    image: &image::DynamicImage,
-    use_cuda: bool,
-) -> Result<fp::Tensor, anyhow::Error> {
-    let img = image.to_rgb8();
-
-    // Lets first just tensorify the image, first create an empty tensor.
-    let mut t = fp::Tensor::zeros(
-        &[img.height() as usize, img.width() as usize, 3],
-        &fp::factory::TensorOptions {
-            dtype: Some(fp::DType::U8),
-            ..Default::default()
-        },
-    )?;
-    // Copy in the data.
-    t.data_mut()?.copy_from_slice(img.as_raw().as_slice());
-
-    // Convert that into a float tensor and multiply it by 255.0
-    let img_float = t.to(&fp::factory::ToOptions {
-        dtype: Some(fp::DType::F32),
-        ..Default::default()
-    })?;
-    let divisor: Tensor = 255.0.try_into()?;
-    let img_tensor_ready = img_float.div(&divisor)?;
-
-    let channels_stacked = img_tensor_ready.permute(&[2, 0, 1])?;
-    if use_cuda {
-        Ok(channels_stacked.to(&fp::Device::CUDA.into())?)
-    } else {
-        Ok(channels_stacked.to_owned()?)
-    }
-}
-
-fn tensor_to_image(ten: &Ten<'_>) -> Result<image::DynamicImage, anyhow::Error> {
-    if ten.dim() != 2 && ten.dim() != 3 {
-        bail!(
-            "Tensor dimension of 2 or 3 was expected, got {:?}",
-            ten.shape()
-        )
-    }
-
-    if ten.dim() == 2 {
-        let mut t = ten.to_owned()?;
-        t = t.to(&fp::DType::F32.into())?;
-        // Greyscale image.
-        let width = ten.size(1);
-        let height = ten.size(0);
-
-        if ten.dtype() == fp::DType::F16 {
-            let t255: Tensor = 255.0.try_into()?;
-            let t255: Tensor = t255.to(&fp::DType::F16.into())?;
-            t = t.mul(&t255)?;
-            t = t.to(&fp::DType::U8.into())?;
-            let mut raw_pixels: Vec<u8> = vec![0; width * height];
-            raw_pixels.copy_from_slice(t.u8s_ref()?);
-            let img = image::GrayImage::from_raw(width as u32, height as u32, raw_pixels)
-                .expect("container is not the right size for width and height");
-            Ok(image::DynamicImage::ImageLuma8(img))
-        } else if ten.dtype() == fp::DType::I64 {
-            t = t.to(&fp::DType::U8.into())?;
-            let mut raw_pixels: Vec<u8> = vec![0; width * height];
-            raw_pixels.copy_from_slice(t.u8s_ref()?);
-            let img = image::GrayImage::from_raw(width as u32, height as u32, raw_pixels)
-                .expect("container is not the right size for width and height");
-            Ok(image::DynamicImage::ImageLuma8(img))
-        } else {
-            todo!("data type {:?} is not implemented yet", ten.dtype());
-        }
-    } else if ten.dim() == 3 {
-        let width = ten.size(1);
-        let height = ten.size(0);
-        let channels = ten.size(2);
-        if channels != 3 {
-            todo!("images must have 3 channels");
-        }
-
-        let mut t = ten.to_owned()?;
-        // Interpret as rgb.
-        if t.dtype() == fp::DType::F16 || t.dtype() == fp::DType::F32 || t.dtype() == fp::DType::F64
-        {
-            // It is a float, so move it to the 255.0 space.
-            t = t.to(&fp::DType::F64.into())?; // widen to full resolution.
-            let t255: Tensor = 255.0.try_into()?;
-            let t255: Tensor = t255.to(&fp::DType::F64.into())?;
-            t = t.mul(&t255)?;
-            // Now it is float 0.0-255.0
-        }
-        // Which is converted to u8 here.
-        t = t.to(&fp::DType::U8.into())?;
-        t = t.contiguous()?;
-        let mut raw_pixels: Vec<u8> = vec![0; width * height * 3];
-        raw_pixels.copy_from_slice(t.u8s_ref()?);
-        let img = image::RgbImage::from_raw(width as u32, height as u32, raw_pixels)
-            .expect("Container is not the right size for width and height");
-        Ok(image::DynamicImage::ImageRgb8(img))
-    } else {
-        todo!("image with more than one channel are not yet handled")
-    }
-}
 
 // -------------- hsv_to_rgb --------------
 // https://github.com/python/cpython/blob/0fff6bd86cf0224152c509e295d3cbbd209098f3/Lib/colorsys.py#L145
@@ -213,16 +112,24 @@ pub fn main() -> Result<(), anyhow::Error> {
     if use_cuda {
         unet.to(&fp::Device::CUDA.into())?
     }
+    let device = if use_cuda {
+        fp::Device::CUDA
+    } else {
+        fp::Device::CPU
+    };
 
     println!("unet channels out: {:?}", unet.channels_out());
     let palette = generate_color_palette(unet.channels_out())?;
     const COLOR_MASK_OUTPUT: bool = true;
 
+    let f32_255: Tensor = 255.0.try_into()?;
     // Iterate over the input arguments and run the network.
     for argument in std::env::args().skip(2) {
-        let img = image::ImageReader::open(&argument)?.decode()?;
-        let channels_stacked = image_to_float_tensor(&img, use_cuda)?;
-        let channels_stacked = channels_stacked.to(&unet.dtype().into())?;
+        let img = Tensor::read_image(&argument)?
+            .to(&fp::DType::F32.into())?
+            .to(&device.into())?
+            .div(&f32_255)?;
+        let channels_stacked = img.to(&unet.dtype().into())?;
         let dimension = (.., 64..(896 + 64), 128..1792); // 1664x832
         let indexed = channels_stacked.i(dimension.clone())?;
         let image = indexed.unsqueeze(0)?;
@@ -236,14 +143,12 @@ pub fn main() -> Result<(), anyhow::Error> {
         })?;
 
         let mut mask_image = Tensor::zeros(
-            &[
-                unet.channels_out(),
-                img.height() as usize,
-                img.width() as usize,
-            ],
+            &[unet.channels_out(), img.size(1), img.size(2)],
             &Default::default(),
         )?;
-        mask_image.i_mut(dimension)?.copy_(&r.squeeze()?)?;
+        mask_image
+            .i_mut(dimension)?
+            .copy_from_tensor(&r.squeeze()?)?;
         let duration = (std::time::Instant::now() - start).as_secs_f64();
         println!("{argument}: {duration:.2}s"); // First 0.29s, subseq 0.18
 
@@ -256,12 +161,15 @@ pub fn main() -> Result<(), anyhow::Error> {
                 .to_owned()?;
             println!("color_per_pixel shape: {:?}", color_per_pixel.shape());
 
-            img = tensor_to_image(&color_per_pixel.ten()?)?;
+            //img = tensor_to_image(&color_per_pixel.ten()?)?;
+            let color_per_pixel = color_per_pixel.permute(&[2, 0, 1])?.contiguous()?;
+            img = color_per_pixel.to_dynamic_image()?;
         } else {
             let t255: Tensor = 255.try_into()?;
             let max = mask_image.argmax(Some(0), Some(true))?.mul(&t255)?;
             let max_squeezed = max.squeeze()?;
-            img = tensor_to_image(&max_squeezed.ten()?)?;
+            // img = tensor_to_image(&max_squeezed.ten()?)?;
+            img = max_squeezed.to_dynamic_image()?;
         }
 
         img.save("/tmp/first_light.png")?;
