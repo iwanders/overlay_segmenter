@@ -1,7 +1,7 @@
 use anyhow::bail;
 use flash_powder as fp;
-use flash_powder::{Ten, Tensor, nn, prelude::*};
-use flash_powder_image::{TensorFromImage, TensorToImage};
+use flash_powder::{Tensor, nn, prelude::*};
+use flash_powder_image::prelude::*;
 use nn::module::Module;
 
 pub mod model;
@@ -122,13 +122,17 @@ pub fn main() -> Result<(), anyhow::Error> {
     let palette = generate_color_palette(unet.channels_out())?;
     const COLOR_MASK_OUTPUT: bool = true;
 
-    let f32_255: Tensor = 255.0.try_into()?;
     // Iterate over the input arguments and run the network.
     for argument in std::env::args().skip(2) {
-        let img = Tensor::read_image(&argument)?
-            .to(&fp::DType::F32.into())?
-            .to(&device.into())?
-            .div(&f32_255)?;
+        let path = std::path::PathBuf::from(&argument);
+        if argument.contains("_mask.png")
+            || argument.contains("_values.png")
+            || argument.contains("_batch.png")
+        {
+            // println!("  Ignoring {argument:?} because it looks like our output");
+            continue;
+        }
+        let img = Tensor::read_image(&argument)?.image_floatify(&device.into())?;
         let channels_stacked = img.to(&unet.dtype().into())?;
         let dimension = (.., 64..(896 + 64), 128..1792); // 1664x832
         let indexed = channels_stacked.i(dimension.clone())?;
@@ -136,7 +140,8 @@ pub fn main() -> Result<(), anyhow::Error> {
 
         let start = std::time::Instant::now();
         let r = unet.forward(&image.ten()?)?;
-        println!("r: \n{:?}", r);
+
+        // println!("r: \n{:?}", r);
         let r = r.to(&flash_powder::factory::ToOptions {
             device: Some(fp::Device::CPU),
             ..Default::default()
@@ -159,7 +164,6 @@ pub fn main() -> Result<(), anyhow::Error> {
                 .index_tensor(&[pixel_index])?
                 .squeeze()?
                 .to_owned()?;
-            println!("color_per_pixel shape: {:?}", color_per_pixel.shape());
 
             //img = tensor_to_image(&color_per_pixel.ten()?)?;
             let color_per_pixel = color_per_pixel.permute(&[2, 0, 1])?.contiguous()?;
@@ -172,7 +176,12 @@ pub fn main() -> Result<(), anyhow::Error> {
             img = max_squeezed.to_dynamic_image()?;
         }
 
-        img.save("/tmp/first_light.png")?;
+        let stem = path.file_stem().unwrap().display();
+        img.save(format!("/tmp/{}_mask.png", stem))?;
+        // Lets also make value, to do that, we make mask_image from [C, H, W] into [C, 1, H, W].
+        let batch_of_values = mask_image.unsqueeze(1)?;
+        let batch_of_values_normalized = batch_of_values.image_scale_to_domain()?;
+        batch_of_values_normalized.save_image(format!("/tmp/{}_values.png", stem))?;
     }
 
     Ok(())
