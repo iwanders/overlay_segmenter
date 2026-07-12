@@ -1,11 +1,25 @@
 use anyhow::bail;
+use fp::Device;
 use fp::prelude::*;
-use fp::{Device, Tensor};
 use overlay_segmenter::flash_powder as fp;
 use overlay_segmenter::model::{UNet, UNetOptions};
 
 use flash_powder_image::prelude::*;
 use overlay_segmenter::generate_color_palette;
+
+/*
+reloader.html;
+<html>
+<img id="my-image" src="http://localhost:8000/output_mask.png" alt="Live Feed"><script> function reloadFast() {
+  const img = document.getElementById('my-image');
+    img.src = 'output_mask.png?v=' + new Date().getTime();
+  }
+  setInterval(reloadFast, 10);
+</script>
+</html>
+
+python3 -m http.server
+*/
 
 pub fn main() -> Result<(), anyhow::Error> {
     use std::path::PathBuf;
@@ -58,19 +72,26 @@ pub fn main() -> Result<(), anyhow::Error> {
     println!("Capture reports resolution of: {:?}", res);
 
     let display = 0;
-    let x = 0;
-    let y = 0;
     let width = 512;
     let height = 512;
+    let x = 1920 / 2 - width / 2;
+    let y = 1080 / 2 - height / 2;
     grabber.prepare_capture(display, x, y, width, height)?;
 
     let output_path = "/tmp/screen_section.png";
     use std::time::{Duration, Instant};
 
-    let interval: f32 = 0.050;
+    let interval: f32 = 0.001;
 
     const WRITE_RGB_TO_DISK: bool = false;
+    const PRINT_DURATIONS: bool = true;
+    let palette = palette.to(&device.into())?;
+
+    let global_start = Instant::now();
+    let mut loop_counter = 0;
+
     loop {
+        loop_counter += 1;
         let start = Instant::now();
 
         grabber.capture_image()?;
@@ -100,12 +121,9 @@ pub fn main() -> Result<(), anyhow::Error> {
 
         let r = unet.forward(&image.ten()?)?;
         let duration = (std::time::Instant::now() - start).as_secs_f64();
-        println!(" Acquisition and prep {duration:.4}s");
-
-        let r = r.to(&flash_powder::factory::ToOptions {
-            device: Some(fp::Device::CPU),
-            ..Default::default()
-        })?;
+        if PRINT_DURATIONS {
+            println!(" Acquisition and prep {duration:.4}s");
+        }
 
         let output = r.squeeze()?;
 
@@ -117,11 +135,23 @@ pub fn main() -> Result<(), anyhow::Error> {
 
         //img = tensor_to_image(&color_per_pixel.ten()?)?;
         let color_per_pixel = color_per_pixel.permute(&[2, 0, 1])?.contiguous()?;
-        let img = color_per_pixel.to_dynamic_image()?;
-        img.save("/tmp/output_maks.png")?;
+
+        if true {
+            let color_per_pixel = color_per_pixel.to(&&fp::Device::CPU.into())?;
+            let img = color_per_pixel.to_dynamic_image()?;
+            img.save("/tmp/output_mask.png")?;
+        }
 
         let time_taken = (Instant::now() - start).as_secs_f32();
-        println!("Saved {output_path:?} took {time_taken:.4}s");
+        let global_time_taken = (Instant::now() - global_start).as_secs_f64() / loop_counter as f64;
+        let global_fps = 1.0 / global_time_taken;
+
+        if PRINT_DURATIONS {
+            println!(
+                "Saved {output_path:?} took {time_taken:.4}s   avg: {global_time_taken:.4}s {global_fps:.1} fps  ({:?})",
+                color_per_pixel.shape()
+            );
+        }
         let remaining_sleep = (interval - time_taken).max(0.0);
         std::thread::sleep(Duration::from_secs_f32(remaining_sleep));
     }

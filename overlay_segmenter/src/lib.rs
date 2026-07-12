@@ -123,6 +123,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     let palette = generate_color_palette(unet.channels_out())?;
     const COLOR_MASK_OUTPUT: bool = true;
 
+    let palette = palette.to(&device.into())?;
     // Iterate over the input arguments and run the network.
     for argument in std::env::args().skip(2) {
         let path = std::path::PathBuf::from(&argument);
@@ -141,12 +142,6 @@ pub fn main() -> Result<(), anyhow::Error> {
 
         let start = std::time::Instant::now();
         let r = unet.forward(&image.ten()?)?;
-
-        // println!("r: \n{:?}", r);
-        let r = r.to(&flash_powder::factory::ToOptions {
-            device: Some(fp::Device::CPU),
-            ..Default::default()
-        })?;
 
         let mut mask_image = Tensor::zeros(
             &[unet.channels_out(), img.size(1), img.size(2)],
@@ -167,6 +162,7 @@ pub fn main() -> Result<(), anyhow::Error> {
                 .to_owned()?;
 
             //img = tensor_to_image(&color_per_pixel.ten()?)?;
+            let color_per_pixel = color_per_pixel.to(&fp::Device::CPU.into())?;
             let color_per_pixel = color_per_pixel.permute(&[2, 0, 1])?.contiguous()?;
             img = color_per_pixel.to_dynamic_image()?;
         } else {
@@ -174,6 +170,7 @@ pub fn main() -> Result<(), anyhow::Error> {
             let max = mask_image.argmax(Some(0), Some(true))?.mul(&t255)?;
             let max_squeezed = max.squeeze()?;
             // img = tensor_to_image(&max_squeezed.ten()?)?;
+            let max_squeezed = max_squeezed.to(&fp::Device::CPU.into())?;
             img = max_squeezed.to_dynamic_image()?;
         }
 
