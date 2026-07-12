@@ -1,4 +1,5 @@
 use anyhow::bail;
+pub use flash_powder;
 use flash_powder as fp;
 use flash_powder::{Tensor, nn, prelude::*};
 use flash_powder_image::prelude::*;
@@ -55,7 +56,7 @@ pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
     }
 }
 
-fn generate_color_palette(class_count: usize) -> Result<Tensor, anyhow::Error> {
+pub fn generate_color_palette(class_count: usize) -> Result<Tensor, anyhow::Error> {
     let mut colors = vec![[0.0, 0.0, 0.0]];
     let class_count = class_count - 1; // -1 because black was already added
     for i in 0..class_count {

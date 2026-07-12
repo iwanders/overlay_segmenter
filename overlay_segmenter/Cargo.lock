@@ -166,9 +166,9 @@ checksum = "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
 
 [[package]]
 name = "cc"
-version = "1.2.66"
+version = "1.2.67"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5d6cac793997bd970000024b2934968efe83b382de4fdcf4fcb46b6ee4ad996"
+checksum = "e17dd265a7d0f31ef544e1b20e03add05d3b45b491b633b10d67145d2acc1a38"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -317,7 +317,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 [[package]]
 name = "flash_powder"
 version = "0.1.0"
-source = "git+https://github.com/iwanders/flash_powder.git#4c6fc6f5eda36614ee5098256af3dc00f422ad12"
+source = "git+https://github.com/iwanders/flash_powder.git#c85e0d6651dea4d9a280384a1753fad62bce9521"
 dependencies = [
  "anyhow",
  "tinyvec",
@@ -328,18 +328,19 @@ dependencies = [
 [[package]]
 name = "flash_powder_image"
 version = "0.1.0"
-source = "git+https://github.com/iwanders/flash_powder.git#4c6fc6f5eda36614ee5098256af3dc00f422ad12"
+source = "git+https://github.com/iwanders/flash_powder.git#c85e0d6651dea4d9a280384a1753fad62bce9521"
 dependencies = [
  "anyhow",
  "flash_powder",
  "image",
  "torch_stable",
+ "zerocopy",
 ]
 
 [[package]]
 name = "flash_powder_safetensors"
 version = "0.1.0"
-source = "git+https://github.com/iwanders/flash_powder.git#4c6fc6f5eda36614ee5098256af3dc00f422ad12"
+source = "git+https://github.com/iwanders/flash_powder.git#c85e0d6651dea4d9a280384a1753fad62bce9521"
 dependencies = [
  "anyhow",
  "flash_powder",
@@ -686,6 +687,7 @@ dependencies = [
  "flash_powder_image",
  "flash_powder_safetensors",
  "image",
+ "screen_capture",
 ]
 
 [[package]]
@@ -817,9 +819,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rand"
-version = "0.9.4"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44c5af06bb1b7d3216d91932aed5265164bf384dc89cd6ba05cf59a35f5f76ea"
+checksum = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
 dependencies = [
  "rand_chacha",
  "rand_core",
@@ -965,6 +967,18 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "screen_capture"
+version = "0.0.0"
+source = "git+https://github.com/iwanders/screen_capture?rev=6a081da10def86a09e27adf9f21aa505783362ed#6a081da10def86a09e27adf9f21aa505783362ed"
+dependencies = [
+ "image",
+ "libc",
+ "serde",
+ "thiserror",
+ "windows",
 ]
 
 [[package]]
@@ -1119,7 +1133,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 [[package]]
 name = "torch_stable"
 version = "0.1.0"
-source = "git+https://github.com/iwanders/flash_powder.git#4c6fc6f5eda36614ee5098256af3dc00f422ad12"
+source = "git+https://github.com/iwanders/flash_powder.git#c85e0d6651dea4d9a280384a1753fad62bce9521"
 dependencies = [
  "anyhow",
  "cc",
@@ -1211,6 +1225,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
+name = "windows"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aac7fef12f4b59cd0a29339406cc9203ab44e440ddff6b3f5a41455349fa9cf3"
+dependencies = [
+ "windows_aarch64_msvc",
+ "windows_i686_gnu",
+ "windows_i686_msvc",
+ "windows_x86_64_gnu",
+ "windows_x86_64_msvc",
+]
+
+[[package]]
 name = "windows-link"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1224,6 +1251,36 @@ checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
 ]
+
+[[package]]
+name = "windows_aarch64_msvc"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3d027175d00b01e0cbeb97d6ab6ebe03b12330a35786cbaca5252b1c4bf5d9b"
+
+[[package]]
+name = "windows_i686_gnu"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8793f59f7b8e8b01eda1a652b2697d87b93097198ae85f823b969ca5b89bba58"
+
+[[package]]
+name = "windows_i686_msvc"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8602f6c418b67024be2996c512f5f995de3ba417f4c75af68401ab8756796ae4"
+
+[[package]]
+name = "windows_x86_64_gnu"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3d615f419543e0bd7d2b3323af0d86ff19cbc4f816e6453f36a2c2ce889c354"
+
+[[package]]
+name = "windows_x86_64_msvc"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11d95421d9ed3672c280884da53201a5c46b7b2765ca6faf34b0d71cf34a3561"
 
 [[package]]
 name = "wit-bindgen"

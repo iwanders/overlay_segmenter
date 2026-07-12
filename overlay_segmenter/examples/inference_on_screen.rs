@@ -1,0 +1,130 @@
+use anyhow::bail;
+use fp::prelude::*;
+use fp::{Device, Tensor};
+use overlay_segmenter::flash_powder as fp;
+use overlay_segmenter::model::{UNet, UNetOptions};
+
+use flash_powder_image::prelude::*;
+use overlay_segmenter::generate_color_palette;
+
+pub fn main() -> Result<(), anyhow::Error> {
+    use std::path::PathBuf;
+
+    let args = std::env::args().collect::<Vec<String>>();
+
+    let safetensors_path = if let Some(path) = args.get(1) {
+        path.to_owned()
+    } else {
+        bail!("missing safetensors argument")
+    };
+    // Verify weights exist, if not give a nice warning.
+    let weights = PathBuf::from(safetensors_path);
+    if !weights.is_file() {
+        eprintln!(
+            "Missing {:?}, path should be to safetensors file.",
+            weights.display()
+        );
+        bail!("missing necessary file, bailing out")
+    }
+
+    // Load safetensors and wrap
+    let data = std::fs::read(weights).expect("Unable to read file");
+    let tensors = flash_powder_safetensors::safetensors::SafeTensors::deserialize(&data)?;
+    let our_safetensor = flash_powder_safetensors::SafetensorReader::from_safetensors(&tensors);
+
+    // Instantiate the network and load its weights.
+    let mut unet = UNet::new(&UNetOptions::default())?;
+    unet.load_state_dict(&our_safetensor)?;
+
+    // Move to cuda if available.
+    let use_cuda = fp::torch::cuda::is_available();
+    println!("cuda available? {use_cuda:?}");
+    if use_cuda {
+        unet.to(&fp::Device::CUDA.into())?
+    }
+    let device = if use_cuda {
+        fp::Device::CUDA
+    } else {
+        fp::Device::CPU
+    };
+
+    println!("unet channels out: {:?}", unet.channels_out());
+    let palette = generate_color_palette(unet.channels_out())?;
+    const COLOR_MASK_OUTPUT: bool = true;
+
+    // Next, create the grabber
+    let mut grabber = screen_capture::capture()?;
+
+    let res = grabber.resolution();
+    println!("Capture reports resolution of: {:?}", res);
+
+    let display = 0;
+    let x = 0;
+    let y = 0;
+    let width = 512;
+    let height = 512;
+    grabber.prepare_capture(display, x, y, width, height)?;
+
+    let output_path = "/tmp/screen_section.png";
+    use std::time::{Duration, Instant};
+
+    let interval: f32 = 0.050;
+
+    const WRITE_RGB_TO_DISK: bool = false;
+    loop {
+        let start = Instant::now();
+
+        grabber.capture_image()?;
+        let img = grabber.image()?;
+
+        let img_flat = img.as_flat_samples();
+        let img_as_flat_tensor = img_flat.as_ten()?;
+        let img_on_device = img_as_flat_tensor.to(&device.into())?;
+        // Now we do the channel shuffle, and lets also drop that alpha.
+        let rgb_without_dummy_a = img_on_device.narrow(2, 0, 3)?;
+        let img_channels_grouped = rgb_without_dummy_a.permute(&[2, 0, 1])?;
+
+        // This is BGR
+        // need RGB, flip on the channel direction.
+        let colors_correct = img_channels_grouped.flip(&[0])?;
+
+        // Save image to disk, just fo clarity.
+        if WRITE_RGB_TO_DISK {
+            colors_correct
+                .to(&Device::CPU.into())?
+                .save_image(&output_path)?;
+        }
+
+        println!("Saved {output_path:?}");
+        let time_taken = (Instant::now() - start).as_secs_f32();
+        let remaining_sleep = (interval - time_taken).max(0.0);
+        std::thread::sleep(Duration::from_secs_f32(remaining_sleep));
+
+        let img = colors_correct.image_floatify(&device.into())?;
+        let channels_stacked = img.to(&unet.dtype().into())?;
+        let image = channels_stacked.unsqueeze(0)?;
+
+        let start = std::time::Instant::now();
+        let r = unet.forward(&image.ten()?)?;
+
+        let r = r.to(&flash_powder::factory::ToOptions {
+            device: Some(fp::Device::CPU),
+            ..Default::default()
+        })?;
+
+        let output = r.squeeze()?;
+        let duration = (std::time::Instant::now() - start).as_secs_f64();
+        println!("  {duration:.2}s"); // First 0.29s, subseq 0.18
+
+        let pixel_index = output.argmax(Some(0), Some(true))?;
+        let color_per_pixel = palette
+            .index_tensor(&[pixel_index])?
+            .squeeze()?
+            .to_owned()?;
+
+        //img = tensor_to_image(&color_per_pixel.ten()?)?;
+        let color_per_pixel = color_per_pixel.permute(&[2, 0, 1])?.contiguous()?;
+        let img = color_per_pixel.to_dynamic_image()?;
+        img.save("/tmp/output_maks.png")?;
+    }
+}

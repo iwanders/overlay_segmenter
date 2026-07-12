@@ -5,7 +5,7 @@ edition = "2024"
 
 # Single source of truth; https://users.rust-lang.org/t/how-to-specify-a-dev-dependency-with-the-same-version-as-the-matching-dependency/89934/4
 [workspace.dependencies]
-flash_powder = { git = "https://github.com/iwanders/flash_powder.git", version = "0.1.0", features = ["cuda", "v2_13"] }
+flash_powder = { git = "https://github.com/iwanders/flash_powder.git", version = "0.1.0", features = ["cuda" ] }
 flash_powder_safetensors = { git = "https://github.com/iwanders/flash_powder.git", version = "0.1.0" }
 flash_powder_image = { git = "https://github.com/iwanders/flash_powder.git", version = "0.1.0" }
 #flash_powder = { path="../../../torch_stable_rs/repo/flash_powder", features = ["cuda", "v2_13"] }
@@ -22,6 +22,9 @@ flash_powder_image = {workspace=true}
 
 [build-dependencies]
 flash_powder = {workspace=true}
+
+[dev-dependencies]
+screen_capture = { git = "https://github.com/iwanders/screen_capture", rev = "6a081da10def86a09e27adf9f21aa505783362ed" }
 
 [profile.release]
 debug = true
