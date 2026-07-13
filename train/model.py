@@ -22,7 +22,7 @@ import torch.nn as nn
 
 
 class Unet(nn.Module):
-    def __init__(self, channels_in=3, channels_out=2, use_upconv=True):
+    def __init__(self, channels_in=3, channels_out=2, use_upconv=True, bottleneck_size: int = 512):
         super().__init__()
         self._channels_out = channels_out
         self._use_upconv = use_upconv
@@ -47,7 +47,7 @@ class Unet(nn.Module):
         # Done with encoder
 
         # Now we're at the bottleneck at the bottom.
-        self.bottleneck = conv_block(512, 1024)
+        self.bottleneck = conv_block(512, bottleneck_size)
 
         # Decoder next
 
@@ -58,13 +58,13 @@ class Unet(nn.Module):
 
         if use_upconv:
             self.decoder_up_level4 = nn.ConvTranspose2d(
-                1024, 1024, kernel_size=2, stride=2
+                bottleneck_size, bottleneck_size, kernel_size=2, stride=2
             )
         else:
             self.decoder_up_level4 = nn.Upsample(
                 scale_factor=2, mode="bilinear", align_corners=True
             )
-        self.decoder_conv_4 = conv_block(512 + 1024, 512)
+        self.decoder_conv_4 = conv_block(512 + bottleneck_size, 512)
 
         if use_upconv:
             self.decoder_up_level3 = nn.ConvTranspose2d(

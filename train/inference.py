@@ -13,11 +13,10 @@ from torch import Tensor
 
 from dataset_generator import (
     generate_color_palette,
-    label_map_to_rgbmask,
-    load_image_file,
+    label_map_to_rgbmask, 
 )
 from model import Unet
-from util import lookup_dtype
+from util import lookup_dtype, load_image_file
 
 if torch.cuda.is_available():
     print(f"GPU: {torch.cuda.get_device_name(0)} is available.")
