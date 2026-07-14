@@ -16,13 +16,13 @@ import torch.nn as nn
                      """
 
 
-# Todo;
-# - Flag to change Upsample into ConvTranspose2D (upconv)
+# Todo; 
 # - Probably don't need as thick of a bottleneck at the bottom.
 
+DEFAULT_UNET_SIZE = tuple([64, 128, 256, 512, 1024, 512, 256, 128, 64])
 
 class Unet(nn.Module):
-    def __init__(self, channels_in=3, channels_out=2, use_upconv=True, bottleneck_size: int = 1024):
+    def __init__(self, channels_in=3, channels_out=2, use_upconv=True, sizes: list[int] =  DEFAULT_UNET_SIZE):
         super().__init__()
         self._channels_out = channels_out
         self._use_upconv = use_upconv
@@ -35,19 +35,24 @@ class Unet(nn.Module):
                 nn.ReLU(),
             )
 
-        # Encoder first.
-        self.encoder_conv_1 = conv_block(channels_in, 64)
+
+        encoder_sizes = sizes[0:4]
+        decoder_sizes = sizes[5:]
+        bottleneck_size = sizes[4]
+
+        # Encoder first. 
+        self.encoder_conv_1 = conv_block(channels_in, encoder_sizes[0])
         # Now a maxpool
         self.maxpool2x2 = nn.MaxPool2d(2)
-        self.encoder_conv_2 = conv_block(64, 128)
+        self.encoder_conv_2 = conv_block(encoder_sizes[0], encoder_sizes[1])
         # another maxpool, but no weights in that, so can reuse it.
-        self.encoder_conv_3 = conv_block(128, 256)
-        self.encoder_conv_4 = conv_block(256, 512)
+        self.encoder_conv_3 = conv_block(encoder_sizes[1], encoder_sizes[2])
+        self.encoder_conv_4 = conv_block(encoder_sizes[2], encoder_sizes[3])
 
         # Done with encoder
 
         # Now we're at the bottleneck at the bottom.
-        self.bottleneck = conv_block(512, bottleneck_size)
+        self.bottleneck = conv_block(encoder_sizes[3], bottleneck_size)
 
         # Decoder next
 
@@ -64,41 +69,41 @@ class Unet(nn.Module):
             self.decoder_up_level4 = nn.Upsample(
                 scale_factor=2, mode="bilinear", align_corners=True
             )
-        self.decoder_conv_4 = conv_block(512 + bottleneck_size, 512)
+        self.decoder_conv_4 = conv_block(decoder_sizes[0] + bottleneck_size, decoder_sizes[0])
 
         if use_upconv:
             self.decoder_up_level3 = nn.ConvTranspose2d(
-                512, 512, kernel_size=2, stride=2
+                decoder_sizes[0], decoder_sizes[0], kernel_size=2, stride=2
             )
         else:
             self.decoder_up_level3 = nn.Upsample(
                 scale_factor=2, mode="bilinear", align_corners=True
             )
-        self.decoder_conv_3 = conv_block(256 + 512, 256)
+        self.decoder_conv_3 = conv_block(decoder_sizes[1] + decoder_sizes[0], decoder_sizes[1])
 
         if use_upconv:
             self.decoder_up_level2 = nn.ConvTranspose2d(
-                256, 256, kernel_size=2, stride=2
+                decoder_sizes[1], decoder_sizes[1], kernel_size=2, stride=2
             )
         else:
             self.decoder_up_level2 = nn.Upsample(
                 scale_factor=2, mode="bilinear", align_corners=True
             )
-        self.decoder_conv_2 = conv_block(128 + 256, 128)
+        self.decoder_conv_2 = conv_block(decoder_sizes[2] + decoder_sizes[1], decoder_sizes[2] )
 
         if use_upconv:
             self.decoder_up_level1 = nn.ConvTranspose2d(
-                128, 128, kernel_size=2, stride=2
+                decoder_sizes[2] , decoder_sizes[2] , kernel_size=2, stride=2
             )
         else:
             self.decoder_up_level1 = nn.Upsample(
                 scale_factor=2, mode="bilinear", align_corners=True
             )
-        self.decoder_conv_1 = conv_block(64 + 128, 64)
+        self.decoder_conv_1 = conv_block(decoder_sizes[3]  + decoder_sizes[2] , decoder_sizes[3])
 
         # And then we have a conv 1x1, why does this have 2 channels out??
         self.last_conv = nn.Conv2d(
-            64,
+            decoder_sizes[3],
             out_channels=channels_out,
             kernel_size=1,  # , padding=1
             # Probably don't want that padding, since it makes the output image a different size than the input image.
@@ -198,9 +203,17 @@ if __name__ == "__main__":
         x = model(im)
     print(f"Input shape: {im.shape}", im[:, 0:3, 0:3])
     print(f"Output shape: {x.shape}", x[:, 0:3, 0:3])
+    
 
     model_shapes = model.shapes()
-    assert model_shapes == [(64, 3, 3, 3), (64, 64, 3, 3), (128, 64, 3, 3), (128, 128, 3, 3), (256, 128, 3, 3), (256, 256, 3, 3), (512, 256, 3, 3), (512, 512, 3, 3), (1024, 512, 3, 3), (1024, 1024, 3, 3), (1024, 1024, 2, 2), (512, 1536, 3, 3), (512, 512, 3, 3), (512, 512, 2, 2), (256, 768, 3, 3), (256, 256, 3, 3), (256, 256, 2, 2), (128, 384, 3, 3), (128, 128, 3, 3), (128, 128, 2, 2), (64, 192, 3, 3), (64, 64, 3, 3), (2, 64, 1, 1)]
+    expected = [(64, 3, 3, 3), (64, 64, 3, 3), (128, 64, 3, 3), (128, 128, 3, 3), (256, 128, 3, 3), (256, 256, 3, 3), (512, 256, 3, 3), (512, 512, 3, 3), (1024, 512, 3, 3), (1024, 1024, 3, 3), (1024, 1024, 2, 2), (512, 1536, 3, 3), (512, 512, 3, 3), (512, 512, 2, 2), (256, 768, 3, 3), (256, 256, 3, 3), (256, 256, 2, 2), (128, 384, 3, 3), (128, 128, 3, 3), (128, 128, 2, 2), (64, 192, 3, 3), (64, 64, 3, 3), (2, 64, 1, 1)]
+    assert model_shapes == expected
+
+    assert abs(x[0, 0, 0, 0] - -0.0547) < 0.001
+
+    for r in expected:
+        print(r)
+        
     
 
     sys.exit(0)

@@ -24,7 +24,7 @@ from dataset_generator import (
     logits_to_rgb_values,
     mask_label_map,
 )
-from model import Unet
+from model import Unet, DEFAULT_UNET_SIZE
 from util import (
     lookup_device,
 )
@@ -48,6 +48,7 @@ class TrainConfig(BaseModel):
     epoch_stop: int = 100_000_000
     output_dir: Path = Path("/tmp/train/")
     label_map: dict[int, int] = {0: 0, 255: 1}
+    unet_size: list[int] =  list(DEFAULT_UNET_SIZE)
 
 
 parser = argparse.ArgumentParser(prog="train")
@@ -143,7 +144,7 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 best_vloss = 1_000_000.0
 torch.manual_seed(train_config.model_seed)
-model = Unet(channels_in=3, channels_out=train_config.channel_out)
+model = Unet(channels_in=3, channels_out=train_config.channel_out, sizes=train_config.unet_size)
 
 model = model.to(device)
 

@@ -52,6 +52,8 @@ train_config:
     generation_seed: 42
     # Channel out needs to map to the number of unique (and consecutive from 0) indices in label_map.
     channel_out: 3
+    # The channels at each level of the unet. (each entry is two conv2ds)
+    #unet_size: [64, 128, 256, 512, 1024, 512, 256, 128, 64]
     # Map from the label images' first channel value to the desired class.
     label_map:
         # Background
