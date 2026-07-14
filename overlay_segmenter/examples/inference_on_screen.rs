@@ -148,7 +148,6 @@ pub fn main() -> Result<(), anyhow::Error> {
         let color_per_pixel = color_per_pixel.permute(&[2, 0, 1])?.contiguous()?;
 
         if true {
-            let color_per_pixel = color_per_pixel.to(&&fp::Device::CPU.into())?;
             let img = color_per_pixel.to_dynamic_image()?;
             img.save("/tmp/output_mask.png")?;
         }
