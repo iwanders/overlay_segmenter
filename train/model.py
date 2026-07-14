@@ -22,7 +22,7 @@ import torch.nn as nn
 
 
 class Unet(nn.Module):
-    def __init__(self, channels_in=3, channels_out=2, use_upconv=True, bottleneck_size: int = 512):
+    def __init__(self, channels_in=3, channels_out=2, use_upconv=True, bottleneck_size: int = 1024):
         super().__init__()
         self._channels_out = channels_out
         self._use_upconv = use_upconv
@@ -159,10 +159,31 @@ class Unet(nn.Module):
 
         return output
 
-
+    def shapes(self):
+        shape = []
+        for d in [self.encoder_conv_1, self.encoder_conv_2, self.encoder_conv_3, self.encoder_conv_4]:
+            shape.append(tuple(d[0].weight.shape[:]))
+            shape.append(tuple(d[2].weight.shape[:]))
+            
+        for d in [self.bottleneck]:
+            shape.append(tuple(d[0].weight.shape[:]))
+            shape.append(tuple(d[2].weight.shape[:]))
+            
+        for d in [self.decoder_up_level4, self.decoder_conv_4, 
+            self.decoder_up_level3, self.decoder_conv_3, 
+            self.decoder_up_level2, self.decoder_conv_2, 
+            self.decoder_up_level1, self.decoder_conv_1,
+            self.last_conv]:
+            if isinstance(d, nn.Sequential):
+                shape.append(tuple(d[0].weight.shape[:]))
+                shape.append(tuple(d[2].weight.shape[:]))
+            else:
+                shape.append(tuple(d.weight.shape[:]))
+        return shape
 if __name__ == "__main__":
     import sys
 
+    torch.manual_seed(0)
     batch_size = 1
     input_channels = 3
     output_channels = 2
@@ -177,6 +198,10 @@ if __name__ == "__main__":
         x = model(im)
     print(f"Input shape: {im.shape}", im[:, 0:3, 0:3])
     print(f"Output shape: {x.shape}", x[:, 0:3, 0:3])
+
+    model_shapes = model.shapes()
+    assert model_shapes == [(64, 3, 3, 3), (64, 64, 3, 3), (128, 64, 3, 3), (128, 128, 3, 3), (256, 128, 3, 3), (256, 256, 3, 3), (512, 256, 3, 3), (512, 512, 3, 3), (1024, 512, 3, 3), (1024, 1024, 3, 3), (1024, 1024, 2, 2), (512, 1536, 3, 3), (512, 512, 3, 3), (512, 512, 2, 2), (256, 768, 3, 3), (256, 256, 3, 3), (256, 256, 2, 2), (128, 384, 3, 3), (128, 128, 3, 3), (128, 128, 2, 2), (64, 192, 3, 3), (64, 64, 3, 3), (2, 64, 1, 1)]
+    
 
     sys.exit(0)
     # torch.Size([4, 3, 584, 565])
