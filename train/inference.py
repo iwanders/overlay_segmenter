@@ -336,6 +336,14 @@ def write_network_output(
     mask_image: Tensor, directory: Path, name_prefix: str, name_suffix: str = ""
 ):
     mask_img = directory / f"{name_prefix}_mask{name_suffix}.png"
+
+    USE_SOFTMAX_THRESHOLD = True
+    if USE_SOFTMAX_THRESHOLD:
+        mask_image = F.softmax(mask_image, 0)
+        print(f"mask image shape: {mask_image.shape}")
+        above_threshold = mask_image > 0.8
+        mask_image = mask_image * above_threshold
+        print(f"above_threshold: {above_threshold.shape}")
     index_mask = mask_image.argmax(0)
 
     label_to_rgb = generate_color_palette(mask_image.shape[0])

@@ -1,6 +1,6 @@
 use anyhow::bail;
-use fp::Device;
 use fp::prelude::*;
+use fp::{Device, Tensor};
 use overlay_segmenter::flash_powder as fp;
 use overlay_segmenter::model::{UNet, UNetOptions};
 
@@ -85,6 +85,7 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     const WRITE_RGB_TO_DISK: bool = false;
     const PRINT_DURATIONS: bool = true;
+    const USE_SOFTMAX_THRESHOLDING: bool = true;
     let palette = palette.to(&device.into())?;
 
     let global_start = Instant::now();
@@ -126,6 +127,16 @@ pub fn main() -> Result<(), anyhow::Error> {
         }
 
         let output = r.squeeze()?;
+
+        let output = if USE_SOFTMAX_THRESHOLDING {
+            let sm = fp::functional::softmax_int(&output, 0, None)?;
+            let threshold: Tensor = 0.3.try_into()?;
+            let above = sm.ge(&threshold)?;
+
+            sm.mul(&above)?
+        } else {
+            output.to_owned()?
+        };
 
         let pixel_index = output.argmax(Some(0), Some(true))?;
         let color_per_pixel = palette
