@@ -153,8 +153,7 @@ pub fn main() -> Result<(), anyhow::Error> {
         let duration = (std::time::Instant::now() - start).as_secs_f64();
         println!("{argument}: {duration:.2}s"); // First 0.29s, subseq 0.18
 
-        let img;
-        if COLOR_MASK_OUTPUT {
+        let img = if COLOR_MASK_OUTPUT {
             let pixel_index = mask_image.argmax(Some(0), Some(true))?;
             let color_per_pixel = palette
                 .index_tensor(&[pixel_index])?
@@ -164,15 +163,15 @@ pub fn main() -> Result<(), anyhow::Error> {
             //img = tensor_to_image(&color_per_pixel.ten()?)?;
             let color_per_pixel = color_per_pixel.to(&fp::Device::CPU.into())?;
             let color_per_pixel = color_per_pixel.permute(&[2, 0, 1])?.contiguous()?;
-            img = color_per_pixel.to_dynamic_image()?;
+            color_per_pixel.to_dynamic_image()?
         } else {
             let t255: Tensor = 255.try_into()?;
             let max = mask_image.argmax(Some(0), Some(true))?.mul(&t255)?;
             let max_squeezed = max.squeeze()?;
             // img = tensor_to_image(&max_squeezed.ten()?)?;
             let max_squeezed = max_squeezed.to(&fp::Device::CPU.into())?;
-            img = max_squeezed.to_dynamic_image()?;
-        }
+            max_squeezed.to_dynamic_image()?
+        };
 
         let stem = path.file_stem().unwrap().display();
         img.save(format!("/tmp/{}_mask.png", stem))?;

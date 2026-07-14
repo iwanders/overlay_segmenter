@@ -337,7 +337,7 @@ def write_network_output(
 ):
     mask_img = directory / f"{name_prefix}_mask{name_suffix}.png"
 
-    USE_SOFTMAX_THRESHOLD = True
+    USE_SOFTMAX_THRESHOLD = False
     if USE_SOFTMAX_THRESHOLD:
         mask_image = F.softmax(mask_image, 0)
         print(f"mask image shape: {mask_image.shape}")

@@ -85,7 +85,7 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     const WRITE_RGB_TO_DISK: bool = false;
     const PRINT_DURATIONS: bool = true;
-    const USE_SOFTMAX_THRESHOLDING: bool = true;
+    const USE_SOFTMAX_THRESHOLDING: bool = false;
     let palette = palette.to(&device.into())?;
 
     let global_start = Instant::now();
