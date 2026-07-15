@@ -46,7 +46,8 @@ train_config:
     validation_ratio: 0.51
     # Validation every n'th entry, defaults to 1 to perform validation every epoch.
     #validation_nth: 10
-
+    # Base output directory, everything associated to the training goes here.
+    #output_dir: /tmp/train
     # Seed for torch's random seed.
     manual_seed: 3
     # Seed for the model weights and training.

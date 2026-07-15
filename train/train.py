@@ -48,6 +48,7 @@ class TrainConfig(BaseModel):
     generation_seed: int = 42
     epoch_stop: int = 100_000_000
     output_dir: Path = Path("/tmp/train/")
+    save_resumable: bool = False
     label_map: dict[int, int] = {0: 0, 255: 1}
     unet_size: list[int] =  list(DEFAULT_UNET_SIZE)
 
@@ -71,7 +72,6 @@ args = parser.parse_args()
 if args.load_checkpoint is not None:
     if not args.load_checkpoint.is_file():
         raise KeyError(f"File {args.load_checkpoint} does not exist")
-
 
 with open(args.config_file) as f:
     loaded_config = yaml.safe_load(f)
@@ -118,6 +118,11 @@ if True:
 
         rgbmask = label_map_to_rgbmask(label_map, label_to_rgb)
         torchvision.utils.save_image([img, rgbmask], out_path, normalize=False)
+        
+    with open(args.config_file) as f:
+        with open(train_config.output_dir / Path(args.config_file).name, "w") as fo:
+            fo.write(f.read())
+
 
 
 # Larger batches (no change to learning rate) is not actually better?
@@ -179,6 +184,7 @@ if args.load_checkpoint:
 
 model = model.to(torch.float)
 
+scheduler = None
 if train_config.multi_step_lr:
     scheduler = torch.optim.lr_scheduler.MultiStepLR(
         optimizer,
@@ -389,13 +395,15 @@ for epoch in range(epoch_start, train_config.epoch_stop + 1):
         to_store = {
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
+            #"optimizer_state_dict": optimizer.state_dict(),
             "stats": stats,
             "loaded_config": loaded_config,
             "elapsed_time": elapsed_time,
         }
-        if scheduler:
+        if scheduler and train_config.save_resumable:
             to_store["scheduler_state_dict"] = scheduler.state_dict()
+        if train_config.save_resumable:
+            to_store["optimizer_state_dict"] = checkpoint["optimizer_state_dict"] 
         torch.save(
             to_store,
             model_path,

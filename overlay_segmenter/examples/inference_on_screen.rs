@@ -71,11 +71,14 @@ pub fn main() -> Result<(), anyhow::Error> {
     let res = grabber.resolution();
     println!("Capture reports resolution of: {:?}", res);
 
+    // 64 : (896 + 64), 128:1792
     let display = 0;
+    // let width = 1792 - 128;
+    // let height = 896 - 64;
     let width = 512;
     let height = 512;
-    let x = 1920 / 2 - width / 2;
-    let y = 1080 / 2 - height / 2;
+    let x: u32 = 1920 / 2 - width / 2;
+    let y: u32 = 1080 / 2 - height / 2;
     grabber.prepare_capture(display, x, y, width, height)?;
 
     let output_path = "/tmp/screen_section.png";
