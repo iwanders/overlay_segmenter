@@ -403,8 +403,17 @@ def run_convert16(args):
         print(f"Saved to {args.output}")
     elif args.output.suffix == ".safetensors":
         from safetensors.torch import save_file
+        import json
+        metadata = {}
+        for k,v in to_store.items():
+            if k == "model_state_dict":
+                continue
+            metadata[k] = json.dumps(v)
+        unet_size = to_store["loaded_config"]["train_config"].get("unet_size")
+        if unet_size:
+            metadata["unet_size"] = json.dumps(unet_size)
 
-        save_file(model.state_dict(), args.output)
+        save_file(model.state_dict(), filename=args.output, metadata=metadata)
     else:
         raise ValueError(
             f"Unhandled suffix {args.output.suffix}, make sure output ends in .pth or .safetensors"
