@@ -83,9 +83,9 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     let interval: f32 = 0.001;
 
-    const WRITE_RGB_TO_DISK: bool = false;
+    const WRITE_RGB_TO_DISK: bool = true;
     const PRINT_DURATIONS: bool = true;
-    const USE_SOFTMAX_THRESHOLDING: bool = false;
+    const USE_SOFTMAX_THRESHOLDING: bool = true;
     let palette = palette.to(&device.into())?;
 
     let global_start = Instant::now();
@@ -111,9 +111,7 @@ pub fn main() -> Result<(), anyhow::Error> {
 
         // Save image to disk, just fo clarity.
         if WRITE_RGB_TO_DISK {
-            colors_correct
-                .to(&Device::CPU.into())?
-                .save_image(&output_path)?;
+            colors_correct.save_image(&output_path)?;
         }
 
         let img = colors_correct.image_floatify(&device.into())?;
