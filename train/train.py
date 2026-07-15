@@ -41,6 +41,7 @@ class TrainConfig(BaseModel):
     batch_count: int = 40
     batch_size: int = 4
     validation_ratio: float = 0.1
+    validation_nth: int = 1
     manual_seed: int = 3
     model_seed: int = 4
     channel_out: int = 2
@@ -288,9 +289,10 @@ def determine_save_dir_name(epoch: int):
     # 51 * checkpoint size
     return "latest"
 
-
+ 
+avg_vloss = 0.0
 save_model = True
-for epoch in range(epoch_start, train_config.epoch_stop):
+for epoch in range(epoch_start, train_config.epoch_stop + 1):
     epoch_record = {}
     print("EPOCH {}:".format(epoch))
     epoch_record["epoch"] = epoch
@@ -303,7 +305,6 @@ for epoch in range(epoch_start, train_config.epoch_stop):
     epoch_record["train_loss"] = avg_loss
     epoch_record["train_time"] = end_train - start_train
 
-    running_vloss = 0.0
     # Set the model to evaluation mode, disabling dropout and using population
     # statistics for batch normalization.
     model.eval()
@@ -312,52 +313,57 @@ for epoch in range(epoch_start, train_config.epoch_stop):
 
     start_validation = time.time()
     # Disable gradient computation and reduce memory consumption.
+    doing_validation =  epoch % train_config.validation_nth == 0
     with torch.no_grad():
-        for i, vdata in enumerate(validation_loader):
-            vinputs, vlabels = vdata
-            vlabels = mask_label_map(vlabels, train_config.label_map)
-            voutputs = model(vinputs)
-            vloss = loss_fn(voutputs, vlabels)
-            running_vloss += vloss
-
-            # And lets write that to disk shall we.
-            batch_size = vinputs.shape[0]
-            # if True:  # and (epoch < 10 or epoch % 10 == 0):
-            if epoch < 10 or epoch % 10 == 0:
-                epoch_dir.mkdir(parents=True, exist_ok=True)
-                for frame_i in range(batch_size):
-                    real_i = i * batch_size + frame_i
-                    this_slice = voutputs[frame_i, :, :]
-                    this_target = vlabels[frame_i, :, :]
-
-                    # Calculated mask.
-                    mask_img = epoch_dir / f"eval_{real_i:0>5}_mask.png"
-                    index_mask = this_slice.argmax(0)
-                    rgbmask = label_map_to_rgbmask(index_mask, label_to_rgb)
-                    torchvision.utils.save_image(rgbmask, mask_img, normalize=False)
-
-                    # Values
-                    values_rgb_stacked = logits_to_rgb_values(this_slice, label_to_rgb)
-                    values_img = epoch_dir / f"eval_{real_i:0>5}_values.png"
-                    torchvision.utils.save_image(values_rgb_stacked, values_img)
-
-                    # Target
-                    target_img = epoch_dir / f"eval_{real_i:0>5}_target.png"
-                    this_target = label_map_to_rgbmask(this_target, label_to_rgb)
-                    torchvision.utils.save_image(
-                        this_target.to(torch.float), target_img
-                    )
-                    # Original image.
-                    image_img = epoch_dir / f"eval_{real_i:0>5}_image.png"
-                    torchvision.utils.save_image(vinputs[frame_i, :, :], image_img)
+        if doing_validation: 
+            running_vloss = 0.0
+            for i, vdata in enumerate(validation_loader):
+                vinputs, vlabels = vdata
+                vlabels = mask_label_map(vlabels, train_config.label_map)
+                voutputs = model(vinputs)
+                vloss = loss_fn(voutputs, vlabels)
+                running_vloss += vloss
+    
+                # And lets write that to disk shall we.
+                batch_size = vinputs.shape[0]
+                # if True:  # and (epoch < 10 or epoch % 10 == 0):
+                if epoch < 10 or epoch % 10 == 0:
+                    epoch_dir.mkdir(parents=True, exist_ok=True)
+                    for frame_i in range(batch_size):
+                        real_i = i * batch_size + frame_i
+                        this_slice = voutputs[frame_i, :, :]
+                        this_target = vlabels[frame_i, :, :]
+    
+                        # Calculated mask.
+                        mask_img = epoch_dir / f"eval_{real_i:0>5}_mask.png"
+                        index_mask = this_slice.argmax(0)
+                        rgbmask = label_map_to_rgbmask(index_mask, label_to_rgb)
+                        torchvision.utils.save_image(rgbmask, mask_img, normalize=False)
+    
+                        # Values
+                        values_rgb_stacked = logits_to_rgb_values(this_slice, label_to_rgb)
+                        values_img = epoch_dir / f"eval_{real_i:0>5}_values.png"
+                        torchvision.utils.save_image(values_rgb_stacked, values_img)
+    
+                        # Target
+                        target_img = epoch_dir / f"eval_{real_i:0>5}_target.png"
+                        this_target = label_map_to_rgbmask(this_target, label_to_rgb)
+                        torchvision.utils.save_image(
+                            this_target.to(torch.float), target_img
+                        )
+                        # Original image.
+                        image_img = epoch_dir / f"eval_{real_i:0>5}_image.png"
+                        torchvision.utils.save_image(vinputs[frame_i, :, :], image_img)
+            running_vloss = running_vloss.detach()
+            avg_vloss = float(running_vloss / (i + 1))
 
     end_validation = time.time()
-    avg_vloss = running_vloss / (i + 1)
     epoch_record["validation_time"] = end_validation - start_validation
-    epoch_record["validation_loss"] = float(avg_vloss.detach())
+    epoch_record["validation_loss"] = avg_vloss
     elapsed_time = float(time.time() - start_time)
     epoch_record["elapsed_time"] = elapsed_time
-    print(f"LOSS train {avg_loss} valid {avg_vloss}")
+    validation_loss_str = f"valid {avg_vloss}" if doing_validation else ""
+    print(f"LOSS train {avg_loss} {validation_loss_str}")
     current_learning_rate = learning_rate
     if scheduler:
         current_learning_rate = scheduler.get_last_lr()

@@ -28,12 +28,16 @@ else:
 
 def create_model_from_checkpoint(checkpoint) -> Unet:
     # Get the out channels from the checkpoint.
+    unet_size = checkpoint["loaded_config"]["train_config"].get("unet_size")
     last_layer = checkpoint["model_state_dict"].get("last_conv.weight")
     channels_out = 2
     if last_layer is not None:
         channels_out = int(last_layer.shape[0])
 
-    model = Unet(channels_in=3, channels_out=channels_out)
+    kwargs = {}
+    if unet_size is not None:
+        kwargs["sizes"] = unet_size
+    model = Unet(channels_in=3, channels_out=channels_out, **kwargs)
     model.load_state_dict(checkpoint["model_state_dict"])
     return model
 
