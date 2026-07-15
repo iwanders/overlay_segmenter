@@ -279,21 +279,21 @@ def train_one_epoch(epoch_index, label_lookup_map):
     return epoch_loss / count
 
 
-def determine_save_dir_name(epoch: int):
+def determine_save_dir_name_and_checkpoint_type(epoch: int) -> tuple[str, bool]:
     # if epoch < 10:
     #    return f"{epoch:0>4}/"
     # 10
     if epoch < 100 and epoch % 20 == 0:
-        return f"{epoch:0>4}/"
+        return f"{epoch:0>4}/", False
     # 5
     if epoch < 1000 and epoch % 50 == 0:
-        return f"{epoch:0>4}/"
+        return f"{epoch:0>4}/", False
     # 25
     if epoch < 10000 and epoch % 100 == 0:
-        return f"{epoch:0>4}/"
+        return f"{epoch:0>4}/", False
     # 50
     # 51 * checkpoint size
-    return "latest"
+    return "latest", True
 
  
 avg_vloss = 0.0
@@ -315,7 +315,8 @@ for epoch in range(epoch_start, train_config.epoch_stop + 1):
     # statistics for batch normalization.
     model.eval()
 
-    epoch_dir = train_config.output_dir / determine_save_dir_name(epoch)
+    save_subdir, force_resumable = determine_save_dir_name_and_checkpoint_type(epoch)
+    epoch_dir = train_config.output_dir / save_subdir
 
     start_validation = time.time()
     # Disable gradient computation and reduce memory consumption.
@@ -400,10 +401,10 @@ for epoch in range(epoch_start, train_config.epoch_stop + 1):
             "loaded_config": loaded_config,
             "elapsed_time": elapsed_time,
         }
-        if scheduler and train_config.save_resumable:
+        if scheduler and (train_config.save_resumable or force_resumable):
             to_store["scheduler_state_dict"] = scheduler.state_dict()
-        if train_config.save_resumable:
-            to_store["optimizer_state_dict"] = checkpoint["optimizer_state_dict"] 
+        if train_config.save_resumable or force_resumable:
+            to_store["optimizer_state_dict"] = optimizer.state_dict() 
         torch.save(
             to_store,
             model_path,
