@@ -73,10 +73,10 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     // 64 : (896 + 64), 128:1792
     let display = 0;
-    // let width = 1792 - 128;
-    // let height = 896 - 64;
-    let width = 512;
-    let height = 512;
+    let width = 1792 - 128;
+    let height = 896 - 64;
+    //let width = 512;
+    //let height = 512;
     let x: u32 = 1920 / 2 - width / 2;
     let y: u32 = 1080 / 2 - height / 2;
     grabber.prepare_capture(display, x, y, width, height)?;

@@ -2,7 +2,7 @@
 //!
 //! This should be kept in sync to the Python counterpart.
 
-use flash_powder::{Ten, Tensor, functional, nn, prelude::*};
+use flash_powder::{Ten, Tensor, nn, nn::functional, prelude::*};
 use nn::module::{Module, ModuleTensors, ModuleTensorsMut};
 
 #[derive(Debug)]

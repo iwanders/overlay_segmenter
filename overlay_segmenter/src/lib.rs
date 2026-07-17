@@ -105,7 +105,12 @@ pub fn main() -> Result<(), anyhow::Error> {
         let _r = unet.forward(&dummy_image.ten()?)?;
     }
 
-    unet.load_state_dict(&our_safetensor)?;
+    let load_options = nn::StateDictLoadOptions {
+        // Blow away the current tensor sizes and take whatever is in the safetensors.
+        assign: true,
+        ..Default::default()
+    };
+    unet.load_state_dict(&our_safetensor, &load_options)?;
 
     // Move to cuda if available.
     let use_cuda = fp::torch::cuda::is_available();
