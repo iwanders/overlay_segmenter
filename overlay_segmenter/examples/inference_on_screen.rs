@@ -1,11 +1,9 @@
-use anyhow::{Context, bail};
+use anyhow::bail;
 use fp::Tensor;
 use fp::prelude::*;
 use overlay_segmenter::flash_powder as fp;
-use overlay_segmenter::model::{UNet, UNetOptions};
 
 use flash_powder_image::prelude::*;
-use overlay_segmenter::palette::generate_color_palette;
 
 /*
 reloader.html;
@@ -34,33 +32,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     // Verify weights exist, if not give a nice warning.
     let weights = PathBuf::from(safetensors_path);
 
-    // Load safetensors and wrap
-    let data = std::fs::read(&weights)
-        .with_context(|| format!("Could not open safetensors path; {weights:?}"))?;
-    let tensors = flash_powder_safetensors::safetensors::SafeTensors::deserialize(&data)?;
-    let our_safetensor = flash_powder_safetensors::SafetensorReader::from_safetensors(&tensors);
-
-    // Instantiate the network and load its weights.
-    let mut unet = UNet::new(&UNetOptions::default())?;
-
-    let load_options = fp::nn::StateDictLoadOptions {
-        // Blow away the current tensor sizes and take whatever is in the safetensors.
-        assign: true,
-        ..Default::default()
-    };
-    unet.load_state_dict(&our_safetensor, &load_options)?;
-
-    // Move to cuda if available.
-    let device = if fp::torch::cuda::is_available() {
-        fp::Device::CUDA
-    } else {
-        fp::Device::CPU
-    };
-    println!("Device used: {device:?}");
-    unet.to(&device.into())?;
-
-    println!("unet channels out: {:?}", unet.channels_out());
-    let palette = generate_color_palette(unet.channels_out())?;
+    let (unet, device, palette) = overlay_segmenter::common_setup(&weights)?;
 
     // Next, create the grabber
     let mut grabber = screen_capture::capture()?;
