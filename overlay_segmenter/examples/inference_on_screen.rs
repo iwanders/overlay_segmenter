@@ -1,11 +1,11 @@
-use anyhow::bail;
+use anyhow::{Context, bail};
+use fp::Tensor;
 use fp::prelude::*;
-use fp::{Device, Tensor};
 use overlay_segmenter::flash_powder as fp;
 use overlay_segmenter::model::{UNet, UNetOptions};
 
 use flash_powder_image::prelude::*;
-use overlay_segmenter::generate_color_palette;
+use overlay_segmenter::palette::generate_color_palette;
 
 /*
 reloader.html;
@@ -33,34 +33,31 @@ pub fn main() -> Result<(), anyhow::Error> {
     };
     // Verify weights exist, if not give a nice warning.
     let weights = PathBuf::from(safetensors_path);
-    if !weights.is_file() {
-        eprintln!(
-            "Missing {:?}, path should be to safetensors file.",
-            weights.display()
-        );
-        bail!("missing necessary file, bailing out")
-    }
 
     // Load safetensors and wrap
-    let data = std::fs::read(weights).expect("Unable to read file");
+    let data = std::fs::read(&weights)
+        .with_context(|| format!("Could not open safetensors path; {weights:?}"))?;
     let tensors = flash_powder_safetensors::safetensors::SafeTensors::deserialize(&data)?;
     let our_safetensor = flash_powder_safetensors::SafetensorReader::from_safetensors(&tensors);
 
     // Instantiate the network and load its weights.
     let mut unet = UNet::new(&UNetOptions::default())?;
-    unet.load_state_dict(&our_safetensor)?;
+
+    let load_options = fp::nn::StateDictLoadOptions {
+        // Blow away the current tensor sizes and take whatever is in the safetensors.
+        assign: true,
+        ..Default::default()
+    };
+    unet.load_state_dict(&our_safetensor, &load_options)?;
 
     // Move to cuda if available.
-    let use_cuda = fp::torch::cuda::is_available();
-    println!("cuda available? {use_cuda:?}");
-    if use_cuda {
-        unet.to(&fp::Device::CUDA.into())?
-    }
-    let device = if use_cuda {
+    let device = if fp::torch::cuda::is_available() {
         fp::Device::CUDA
     } else {
         fp::Device::CPU
     };
+    println!("Device used: {device:?}");
+    unet.to(&device.into())?;
 
     println!("unet channels out: {:?}", unet.channels_out());
     let palette = generate_color_palette(unet.channels_out())?;
@@ -130,7 +127,7 @@ pub fn main() -> Result<(), anyhow::Error> {
         let output = r.squeeze()?;
 
         let output = if USE_SOFTMAX_THRESHOLDING {
-            let sm = fp::functional::softmax_int(&output, 0, None)?;
+            let sm = fp::nn::functional::softmax_int(&output, 0, None)?;
             let threshold: Tensor = 0.3.try_into()?;
             let above = sm.ge(&threshold)?;
 
