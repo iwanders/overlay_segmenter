@@ -24,6 +24,7 @@ flash_powder_image = {workspace=true}
 flash_powder = {workspace=true}
 
 [dev-dependencies]
+clap = { version = "4.6.2", features = ["derive"] }
 screen_capture = { git = "https://github.com/iwanders/screen_capture", rev = "6a081da10def86a09e27adf9f21aa505783362ed" }
 
 [profile.release]
