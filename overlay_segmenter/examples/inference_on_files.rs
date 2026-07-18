@@ -27,12 +27,22 @@ struct Args {
     /// Write values
     #[arg(short, long)]
     write_values: bool,
+
+    /// Run the accumulator
+    #[arg(short, long)]
+    accumulate: bool,
 }
 
 pub fn main() -> Result<(), anyhow::Error> {
     let args = Args::parse();
 
     let (unet, device, palette) = common_setup(&args.model)?;
+
+    let mut accumulator = if args.accumulate {
+        Some(overlay_segmenter::accumulator::Accumulator::new())
+    } else {
+        None
+    };
 
     let palette = palette.to(&device.into())?;
     // Iterate over the input arguments and run the network.
@@ -46,6 +56,13 @@ pub fn main() -> Result<(), anyhow::Error> {
             // println!("  Ignoring {argument:?} because it looks like our output");
             continue;
         }
+
+        let output_path = args
+            .output
+            .as_ref()
+            .cloned()
+            .unwrap_or(path.parent().unwrap().to_owned());
+
         let img = Tensor::read_image(&path)?.image_floatify(&device.into())?;
         let channels_stacked = img.to(&unet.dtype().into())?;
         let dimension = (.., 64..(896 + 64), 128..1792); // 1664x832
@@ -54,6 +71,11 @@ pub fn main() -> Result<(), anyhow::Error> {
 
         let start = std::time::Instant::now();
         let r = unet.forward(&image.ten()?)?;
+
+        if let Some(accumulator) = accumulator.as_mut() {
+            accumulator.feed_logits_frame(&r.ten()?, Some(&output_path))?;
+        }
+        println!("done accumulating");
 
         let mut mask_image = Tensor::zeros(
             &[unet.channels_out(), img.size(1), img.size(2)],
@@ -64,12 +86,6 @@ pub fn main() -> Result<(), anyhow::Error> {
             .copy_from_tensor(&r.squeeze()?)?;
         let duration = (std::time::Instant::now() - start).as_secs_f64();
         println!("{path:?}: {duration:.2}s"); // First 0.29s, subseq 0.18
-
-        let output_path = args
-            .output
-            .as_ref()
-            .cloned()
-            .unwrap_or(path.parent().unwrap().to_owned());
 
         println!("output_path: {output_path:?}");
 

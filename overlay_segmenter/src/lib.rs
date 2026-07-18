@@ -7,6 +7,8 @@ pub mod palette;
 pub mod model;
 use model::{UNet, UNetOptions};
 
+pub mod accumulator;
+
 use anyhow::Context;
 pub fn create_unet(safetensors_path: &std::path::Path) -> Result<UNet, anyhow::Error> {
     // Load safetensors and wrap
