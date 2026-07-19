@@ -245,6 +245,16 @@ impl std::ops::Add for Position {
         }
     }
 }
+impl std::ops::Sub for Position {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self::Output {
+        Position {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+    }
+}
 
 #[derive(Copy, Clone, Debug)]
 struct Rect {
@@ -286,7 +296,7 @@ impl GridOverlay {
         Self { windows: vec![] }
     }
     /// Add a grid.
-    pub fn add_grid(&mut self, size: (usize, usize), position: (isize, isize)) -> GridId {
+    pub fn add_grid_raw(&mut self, size: (usize, usize), position: (isize, isize)) -> GridId {
         let id = GridId(self.windows.len());
         self.windows.push(GridWindow {
             size: Rect {
@@ -311,6 +321,12 @@ impl GridOverlay {
 
         (min, max)
     }
+
+    pub fn full_size(&self) -> (usize, usize) {
+        let (min, max) = self.extent();
+        let diff = max - min;
+        (diff.x as usize, diff.y as usize)
+    }
 }
 
 #[cfg(test)]
@@ -323,13 +339,54 @@ mod test {
         let overlay = (1, 3);
         let position = (8, 7);
         let mut o = GridOverlay::new();
-        let b_id = o.add_grid(base, (0, 0));
-        let o_id = o.add_grid(overlay, position);
+        let b_id = o.add_grid_raw(base, (0, 0));
+        let o_id = o.add_grid_raw(overlay, position);
 
         let (lowest, highest) = o.extent();
         assert_eq!(lowest.x, 0); // start of base.
         assert_eq!(lowest.y, 0);
         assert_eq!(highest.x, 1 + 8);
         assert_eq!(highest.y, 3 + 7);
+
+        let (w, h) = o.full_size();
+        assert_eq!(w, 1 + 8);
+        assert_eq!(h, 3 + 7);
+
+        // Now, lets place the overlay in the lower quadrant relative to base.
+        let base = (3, 5);
+        let overlay = (1, 3);
+        let position = (-8, -7);
+        let mut o = GridOverlay::new();
+        let b_id = o.add_grid_raw(base, (0, 0));
+        let o_id = o.add_grid_raw(overlay, position);
+
+        let (lowest, highest) = o.extent();
+        assert_eq!(lowest.x, -8); // Start of overlay
+        assert_eq!(lowest.y, -7); //
+        assert_eq!(highest.x, 3);
+        assert_eq!(highest.y, 5);
+
+        let (w, h) = o.full_size();
+        assert_eq!(w, (-8isize - 3isize).abs() as usize);
+        assert_eq!(h, (-7isize - 5isize).abs() as usize);
+
+        // Now, lets put the base not at the origin.
+        let base = (3, 5);
+        let base_pos = (-3, -5);
+        let overlay = (1, 3);
+        let position = (-8, -7);
+        let mut o = GridOverlay::new();
+        let b_id = o.add_grid_raw(base, base_pos);
+        let o_id = o.add_grid_raw(overlay, position);
+
+        let (lowest, highest) = o.extent();
+        assert_eq!(lowest.x, -8); // Start of overlay
+        assert_eq!(lowest.y, -7); //
+        assert_eq!(highest.x, 0);
+        assert_eq!(highest.y, 0);
+
+        let (w, h) = o.full_size();
+        assert_eq!(w, (-8isize - 0isize).abs() as usize);
+        assert_eq!(h, (-7isize - 0isize).abs() as usize);
     }
 }
