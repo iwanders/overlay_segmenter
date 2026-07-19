@@ -7,14 +7,14 @@ use std::path::Path;
 use fp::StableTorchResult;
 
 pub struct AccumulatorConfig {
-    pub base_roi_size: (usize, usize),
+    pub base_roi_size: Option<(usize, usize)>,
     pub frame_roi_size: (usize, usize),
 }
 impl Default for AccumulatorConfig {
     fn default() -> Self {
         Self {
-            base_roi_size: (768, 512),
-            frame_roi_size: (256, 256),
+            base_roi_size: None,
+            frame_roi_size: (512, 512),
         }
     }
 }
@@ -47,41 +47,66 @@ impl Accumulator {
         let frame_width = frame.shape()[3];
         let frame_height = frame.shape()[2];
         let new_frame_index = self.frames.len();
+        let frame = nn::functional::softmax_int(frame, 1, None)?;
         // Should we do a softmax here? or do we just run with the raw logits?
         // Compare it against all the existing frames, because why not.
         let mut best_match: Option<usize> = None;
-        for (i, other_frame) in self.frames.iter().enumerate() {
+        for (i, base_frame) in self.frames.iter().enumerate() {
+            let bf_w = base_frame.shape()[3];
+            let bf_h = base_frame.shape()[2];
             // Run the convolution, lets just do it by shape for now.
             // input;  minibatch, in_channels, iH, iW
             // weight; out_channels, in_channels/groups, kh, kw
 
-            let base_xrange = ((frame_width / 2) - self.config.base_roi_size.0 / 2) as isize
-                ..((frame_width / 2) + self.config.base_roi_size.0 / 2) as isize;
-            let base_yrange = ((frame_height / 2) - self.config.base_roi_size.1 / 2) as isize
-                ..((frame_height / 2) + self.config.base_roi_size.1 / 2) as isize;
+            let (base_xrange, base_yrange) =
+                if let Some(base_roi_size) = self.config.base_roi_size.as_ref() {
+                    let base_xrange = ((bf_w / 2) - base_roi_size.0 / 2) as isize
+                        ..((bf_w / 2) + base_roi_size.0 / 2) as isize;
+                    let base_yrange = ((bf_h / 2) - base_roi_size.1 / 2) as isize
+                        ..((bf_h / 2) + base_roi_size.1 / 2) as isize;
+                    (base_xrange, base_yrange)
+                } else {
+                    (0..bf_w as isize, 0..bf_h as isize)
+                };
+            dbg!(&base_xrange);
+            dbg!(&base_yrange);
 
             let frame_xrange = ((frame_width / 2) - self.config.frame_roi_size.0 / 2) as isize
                 ..((frame_width / 2) + self.config.frame_roi_size.0 / 2) as isize;
             let frame_yrange = ((frame_height / 2) - self.config.frame_roi_size.1 / 2) as isize
                 ..((frame_height / 2) + self.config.frame_roi_size.1 / 2) as isize;
 
-            let other_bg = other_frame
-                .i((0, 1..2, base_yrange, base_xrange))?
+            let base_bg = base_frame
+                .i((0, 1..2, base_yrange.clone(), base_xrange.clone()))?
                 .unsqueeze(0)?
                 .to(&fp::DType::F32.into())?;
+
+            let base_bg = base_bg.image_resize(
+                [base_yrange.len() / 2, base_xrange.len() / 2],
+                nn::functional::InterpolateAlgorithm::Bilinear,
+            )?;
 
             let new_bg = frame
                 .i((0, 1..2, frame_yrange, frame_xrange))?
                 .unsqueeze(0)?
                 .to(&fp::DType::F32.into())?;
-            println!("other shape: {:?}", other_bg.shape());
+
+            let new_bg = new_bg.image_resize(
+                [
+                    self.config.frame_roi_size.1 / 2,
+                    self.config.frame_roi_size.0 / 2,
+                ],
+                nn::functional::InterpolateAlgorithm::Bilinear,
+            )?;
+
+            println!("base shape: {:?}", base_bg.shape());
             println!("new_bg shape: {:?}", new_bg.shape());
             let options = nn::functional::Conv2dOptions {
                 // padding: (10, 10),
                 ..Default::default()
             };
             println!("running conv");
-            let conv2 = nn::functional::conv2d(&other_bg, &new_bg, None, &options)?;
+            let conv2 = nn::functional::conv2d(&base_bg, &new_bg, None, &options)?;
             // Get the peak, check if the peak is higher than current best match.
 
             if let Some(output_dir) = debug_dir {
@@ -90,7 +115,7 @@ impl Accumulator {
                     "old_frame_{i}_new_frame_{new_frame_index:?}_conv.png"
                 ));
                 img_norm.save_image(&path)?;
-                other_bg
+                base_bg
                     .image_scale_to_domain()?
                     .save_image(&output_dir.join(&format!(
                         "old_frame_{i}_new_frame_{new_frame_index:?}_other_bg.png"
@@ -107,7 +132,7 @@ impl Accumulator {
         }
 
         if best_match.is_none() {
-            self.frames.push(frame.to_owned()?);
+            self.frames.push(frame);
         }
 
         Ok(())
