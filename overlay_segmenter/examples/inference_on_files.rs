@@ -114,5 +114,9 @@ pub fn main() -> Result<(), anyhow::Error> {
         }
     }
 
+    if let Some(accumulator) = accumulator.as_mut() {
+        accumulator.debug_use_accumulation(&PathBuf::from("/tmp/debug_output"))?;
+    }
+
     Ok(())
 }
