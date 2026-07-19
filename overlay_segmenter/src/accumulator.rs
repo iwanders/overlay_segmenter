@@ -207,3 +207,129 @@ impl Accumulator {
         Ok(())
     }
 }
+
+#[derive(Copy, Clone, Debug)]
+struct Position {
+    pub x: isize,
+    pub y: isize,
+}
+impl Position {
+    pub fn new(x: isize, y: isize) -> Self {
+        Self { x, y }
+    }
+
+    pub fn origin() -> Self {
+        Self { x: 0, y: 0 }
+    }
+    pub fn min(&self, other: Position) -> Self {
+        Self {
+            x: self.x.min(other.x),
+            y: self.y.min(other.y),
+        }
+    }
+    pub fn max(&self, other: Position) -> Self {
+        Self {
+            x: self.x.max(other.x),
+            y: self.y.max(other.y),
+        }
+    }
+}
+
+impl std::ops::Add for Position {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        Position {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+struct Rect {
+    pub w: usize,
+    pub h: usize,
+}
+impl std::ops::Add<Rect> for Position {
+    type Output = Position;
+
+    fn add(self, rhs: Rect) -> Self::Output {
+        Position {
+            x: self.x + rhs.w as isize,
+            y: self.y + rhs.h as isize,
+        }
+    }
+}
+impl std::ops::Add<Position> for Rect {
+    type Output = Position;
+
+    fn add(self, rhs: Position) -> Self::Output {
+        Position {
+            x: rhs.x + self.w as isize,
+            y: rhs.y + self.h as isize,
+        }
+    }
+}
+
+struct GridId(usize);
+struct GridWindow {
+    size: Rect,
+    position: Position,
+}
+
+struct GridOverlay {
+    windows: Vec<GridWindow>,
+}
+impl GridOverlay {
+    pub fn new() -> Self {
+        Self { windows: vec![] }
+    }
+    /// Add a grid.
+    pub fn add_grid(&mut self, size: (usize, usize), position: (isize, isize)) -> GridId {
+        let id = GridId(self.windows.len());
+        self.windows.push(GridWindow {
+            size: Rect {
+                w: size.0,
+                h: size.1,
+            },
+            position: Position::new(position.0, position.1),
+        });
+        id
+    }
+
+    pub fn extent(&self) -> (Position, Position) {
+        if self.windows.is_empty() {
+            return (Position::origin(), Position::origin());
+        }
+        let mut min = self.windows.first().unwrap().position;
+        let mut max = self.windows.first().unwrap().position;
+        for w in self.windows.iter() {
+            min = min.min(w.position);
+            max = max.max(w.position + w.size)
+        }
+
+        (min, max)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn test_overlay() {
+        // First test, trivial, to the right, completely outside of.
+        let base = (3, 5);
+        let overlay = (1, 3);
+        let position = (8, 7);
+        let mut o = GridOverlay::new();
+        let b_id = o.add_grid(base, (0, 0));
+        let o_id = o.add_grid(overlay, position);
+
+        let (lowest, highest) = o.extent();
+        assert_eq!(lowest.x, 0); // start of base.
+        assert_eq!(lowest.y, 0);
+        assert_eq!(highest.x, 1 + 8);
+        assert_eq!(highest.y, 3 + 7);
+    }
+}
