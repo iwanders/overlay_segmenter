@@ -108,7 +108,7 @@ impl Accumulator {
             )?;
 
             let new_bg = frame
-                .i((0, 1..2, frame_yrange, frame_xrange))?
+                .i((0, 1..2, frame_yrange.clone(), frame_xrange.clone()))?
                 .unsqueeze(0)?
                 .to(&fp::DType::F32.into())?;
 
@@ -163,10 +163,15 @@ impl Accumulator {
             // cols = flat_indices % matrix.shape[1]
             //
             // But that's x at the ROI... and we want X for the full frame.
-            //
-            //
-            let x = x as isize - self.config.frame_roi_size.0 as isize - base_xrange.start;
-            let y = y as isize - self.config.frame_roi_size.1 as isize - base_yrange.start;
+            // Convolution start to frame start:
+            let base_conv_start_to_frame_x = -base_xrange.start;
+            let base_conv_start_to_frame_y = -base_yrange.start;
+            let other_conv_start_to_frame_x = -frame_xrange.start;
+            let other_conv_start_to_frame_y = -frame_yrange.start;
+
+            // Now, we can calculate the frame relation.
+            let x = ((base_conv_start_to_frame_x - other_conv_start_to_frame_x) - (x * 2) as isize);
+            let y = ((base_conv_start_to_frame_y - other_conv_start_to_frame_y) - (y * 2) as isize);
 
             println!("shape conv2: {:?}", conv2.shape());
             //println!("conv2: {:?}", conv2);
@@ -194,14 +199,47 @@ impl Accumulator {
         // Lets just iterate over it all and add the pairs.
         for base in self.frame_relations.iter() {
             let base_frame = &self.frames[base.frame_index];
+            let base_channels = base_frame.isize(1);
+            let base_index = base.frame_index;
             let t: Tensor = 0.5.try_into()?;
-            let base_bool = base_frame.ge(&t)?;
+            let base_bool = base_frame.i((0, 1, .., ..))?.ge(&t)?;
+            let base_bool_as_f = base_bool.to(&fp::DType::F32.into())?;
             for other in base.matches.iter() {
                 let other_frame = &self.frames[other.frame_index];
-                let other_bool = other_frame.ge(&t)?;
+                let other_bool = other_frame.i((0, 1, .., ..))?.ge(&t)?;
+                let other_index = other.frame_index;
 
                 // Lets combine these...
                 // We need to make a canvas using the offset... and size of both frames.
+                // We expressed everything in base.
+                let mut o = GridOverlay::new();
+                let base_id = o.add_tensor(base_frame, (0, 0));
+                let other_id = o.add_tensor(other_frame, (other.x, other.y));
+
+                let full = o.full_size();
+                println!("full: {full:?}");
+                // Allocate the canvas;
+                let options = flash_powder::factory::TensorOptions {
+                    dtype: Some(base_frame.dtype()),
+                    device: Some(base_frame.device()),
+                    ..Default::default()
+                };
+                let mut canvas: Tensor = Tensor::zeros(&[3, full.1, full.0], &options)?; // base_channels
+                // Blit the base;
+                let (bx, by) = o.full_grid_irange(base_id);
+                canvas
+                    .i_mut((0, by, bx))?
+                    .copy_from_tensor(&base_bool_as_f)?;
+                let other_bool_as_f = other_bool.to(&fp::DType::F32.into())?;
+                // And blit the other part
+                let (bx, by) = o.full_grid_irange(other_id);
+                canvas
+                    .i_mut((1, by, bx))?
+                    .copy_from_tensor(&other_bool_as_f)?;
+
+                canvas.image_scale_to_domain()?.save_image(
+                    &debug_dir.join(&format!("combine_{base_index}_with_{other_index}.png")),
+                )?;
             }
         }
         Ok(())
@@ -282,7 +320,10 @@ impl std::ops::Add<Position> for Rect {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
 struct GridId(usize);
+
+#[derive(Copy, Clone, Debug)]
 struct GridWindow {
     size: Rect,
     position: Position,
@@ -307,6 +348,18 @@ impl GridOverlay {
         });
         id
     }
+    /// Add a tensor grid
+    pub fn add_tensor<T: TensorProperties>(&mut self, t: &T, position: (isize, isize)) -> GridId {
+        let id = GridId(self.windows.len());
+        self.windows.push(GridWindow {
+            size: Rect {
+                w: t.isize(-1) as _,
+                h: t.isize(-2) as _,
+            },
+            position: Position::new(position.0, position.1),
+        });
+        id
+    }
 
     pub fn extent(&self) -> (Position, Position) {
         if self.windows.is_empty() {
@@ -326,6 +379,37 @@ impl GridOverlay {
         let (min, max) = self.extent();
         let diff = max - min;
         (diff.x as usize, diff.y as usize)
+    }
+
+    /// Returns the position of this grid in the full size coordinates.
+    pub fn full_grid_position(&self, grid: GridId) -> (usize, usize) {
+        let (min, max) = self.extent();
+        for (i, v) in self.windows.iter().enumerate() {
+            if i == grid.0 {
+                let pos = v.position;
+                let this_pos = pos - min;
+                return (this_pos.x as usize, this_pos.y as usize);
+            }
+        }
+        unreachable!("grid id {grid:?} was passed, which doesn't originate from this GridOverlay");
+    }
+    /// Returns the position of this grid in the full size coordinates.
+    pub fn full_grid_irange(
+        &self,
+        grid: GridId,
+    ) -> (std::ops::Range<isize>, std::ops::Range<isize>) {
+        let (min, _max) = self.extent();
+        for (i, v) in self.windows.iter().enumerate() {
+            if i == grid.0 {
+                let pos = v.position;
+                let this_pos = pos - min;
+                return (
+                    this_pos.x..(this_pos.x + v.size.w as isize),
+                    this_pos.y..(this_pos.y + v.size.h as isize),
+                );
+            }
+        }
+        unreachable!("grid id {grid:?} was passed, which doesn't originate from this GridOverlay");
     }
 }
 
@@ -352,6 +436,13 @@ mod test {
         assert_eq!(w, 1 + 8);
         assert_eq!(h, 3 + 7);
 
+        let b_in_full = o.full_grid_position(b_id);
+        assert_eq!(b_in_full.0, 0);
+        assert_eq!(b_in_full.1, 0);
+        let o_in_full = o.full_grid_position(o_id);
+        assert_eq!(o_in_full.0, 8);
+        assert_eq!(o_in_full.1, 7);
+
         // Now, lets place the overlay in the lower quadrant relative to base.
         let base = (3, 5);
         let overlay = (1, 3);
@@ -369,6 +460,13 @@ mod test {
         let (w, h) = o.full_size();
         assert_eq!(w, (-8isize - 3isize).abs() as usize);
         assert_eq!(h, (-7isize - 5isize).abs() as usize);
+
+        let b_in_full = o.full_grid_position(b_id);
+        assert_eq!(b_in_full.0, 8);
+        assert_eq!(b_in_full.1, 7);
+        let o_in_full = o.full_grid_position(o_id);
+        assert_eq!(o_in_full.0, 0);
+        assert_eq!(o_in_full.1, 0);
 
         // Now, lets put the base not at the origin.
         let base = (3, 5);
@@ -388,5 +486,13 @@ mod test {
         let (w, h) = o.full_size();
         assert_eq!(w, (-8isize - 0isize).abs() as usize);
         assert_eq!(h, (-7isize - 0isize).abs() as usize);
+
+        // Full starts at -8,-7, base is at -3, -5
+        let b_in_full = o.full_grid_position(b_id);
+        assert_eq!(b_in_full.0, (-8isize - -3isize).abs() as usize);
+        assert_eq!(b_in_full.1, (-7isize - -5isize).abs() as usize);
+        let o_in_full = o.full_grid_position(o_id);
+        assert_eq!(o_in_full.0, 0);
+        assert_eq!(o_in_full.1, 0);
     }
 }
