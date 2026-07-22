@@ -63,7 +63,7 @@ impl Pyramid {
 
         debug_dir: Option<(&std::path::Path, &str)>,
     ) -> StableTorchResult<(isize, isize)> {
-        let mut current_full_res_pos: (isize, isize) = (0, 0);
+        let mut pos: (isize, isize) = (0, 0);
         // Go through the pyramids in reverse order, from small images to large.
         for (layer, (b, o)) in self
             .layers
@@ -73,7 +73,7 @@ impl Pyramid {
             .enumerate()
         {
             println!();
-            println!("Global pos {current_full_res_pos:?}");
+            println!("Global pos {pos:?}");
 
             // Layer 0 is a bit special, since there we just pad on all sides with the entire image size >_<
             // All other layers we only really need to do 4 left and right? which we can just do by chopping the borders
@@ -96,23 +96,17 @@ impl Pyramid {
                     ..Default::default()
                 }
             };
-            let offset;
             let (base_img, other_img) = if layer == 0 {
-                offset = (0isize, 0isize);
                 (base_img, other_img)
             } else {
                 let mut grid = GridOverlay::new();
                 let base_id = grid.add_tensor(
                     &base_img,
-                    (
-                        (current_full_res_pos.0 / (b.scale as isize)),
-                        (current_full_res_pos.1 / (b.scale as isize)),
-                    ),
+                    ((pos.0 / (b.scale as isize)), (pos.1 / (b.scale as isize))),
                 );
                 let other_id = grid.add_tensor(&other_img, (0, 0));
                 let (base_overlap_x, base_overlap_y) = grid.overlap_irange(base_id);
                 let (other_overlap_x, other_overlap_y) = grid.overlap_irange(other_id);
-                offset = (grid.overlap().0.x, grid.overlap().0.y);
 
                 // That's in the previous dimension though, so next we need to scale that by two, and then we can slice.
 
@@ -166,37 +160,17 @@ impl Pyramid {
                 }
             }
 
-            let (values, indices) = conv2.flatten(0, None)?.topk(1, &Default::default())?;
+            // let (values, indices) = conv2.flatten(0, None)?.topk(1, &Default::default())?;
 
-            let value = *values.cpu()?.as_f32()?;
-            let indices = indices.cpu()?;
-            let y = (*indices.as_i64()? as usize) / conv2.isize(-1);
-            let x = (*indices.as_i64()? as usize) % conv2.isize(-1);
+            let (score, dx, dy) = conv_peak(&conv2)?;
+            // best_value = value;
+            pos.0 += dx * b.scale;
+            pos.1 += dy * b.scale;
 
             // y_match = (i // output_size[1]).item()
             // x_match = (i % output_size[1]).item()
             // let rows = flat_indices // matrix.shape[1]
             // cols = flat_indices % matrix.shape[1]
-
-            println!("shape conv2: {:?}", conv2.shape());
-            //println!("conv2: {:?}", conv2);
-            println!("values: {:?} {:?} {value}", values.shape(), values);
-
-            if layer == 0 {
-                current_full_res_pos = (
-                    (offset.0 + conv2.isize(-1) as isize / 2 - x as isize) * b.scale as isize,
-                    (offset.1 + conv2.isize(-2) as isize / 2 - y as isize) * b.scale as isize,
-                );
-            } else {
-                current_full_res_pos.0 +=
-                    (conv2.isize(-1) as isize / 2 - x as isize) * b.scale as isize;
-                current_full_res_pos.1 +=
-                    (conv2.isize(-2) as isize / 2 - y as isize) * b.scale as isize;
-            }
-            println!(
-                "indices: {:?} peak at {x},{y}  at scale {}  offset {offset:?}  current_full_res_pos: {current_full_res_pos:?}",
-                indices, b.scale
-            );
 
             if let Some((output_dir, output_prefix)) = debug_dir {
                 let mut grid = GridOverlay::new();
@@ -215,13 +189,7 @@ impl Pyramid {
                     .unwrap();
                 let scale = 1;
                 let base_id = grid.add_tensor(&base_img, (0, 0));
-                let other_id = grid.add_tensor(
-                    &other_img,
-                    (
-                        (current_full_res_pos.0 / b.scale),
-                        (current_full_res_pos.1 / b.scale),
-                    ),
-                );
+                let other_id = grid.add_tensor(&other_img, ((pos.0 / b.scale), (pos.1 / b.scale)));
                 let full = grid.full_size();
                 println!("full: {full:?}");
                 let options = flash_powder::factory::TensorOptions {
@@ -249,4 +217,18 @@ impl Pyramid {
 
         Ok((0, 0))
     }
+}
+
+/// Bounded search radius (in pixels) used when refining an estimate at the finer layers.
+const SEARCH_PADDING: i64 = 20;
+
+/// Returns the `(value, dx, dy)` of a correlation's peak, where `dx`/`dy` are offsets from
+/// the centre of the correlation output.
+fn conv_peak(conv: &Tensor) -> StableTorchResult<(f32, isize, isize)> {
+    let (values, indices) = conv.flatten(0, None)?.topk(1, &Default::default())?;
+    let value = *values.cpu()?.as_f32()?;
+    let index = *indices.cpu()?.as_i64()? as isize;
+    let width = conv.isize(-1) as isize;
+    let (x, y) = (index % width, index / width);
+    Ok((value, width / 2 - x, conv.isize(-2) as isize / 2 - y))
 }
