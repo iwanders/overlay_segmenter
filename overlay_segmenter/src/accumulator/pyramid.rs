@@ -104,90 +104,60 @@ impl Pyramid {
             };
             let conv2 = nn::functional::conv2d(&base_img, &other_img, None, &options)?;
 
-            if let Some((output_dir, output_prefix)) = debug_dir {
-                let img_norm = conv2.image_scale_to_domain()?;
-                let path = output_dir.join(&format!("{output_prefix}_level_{layer}_conv.png"));
-                img_norm.save_image(&path)?;
-                base_img.image_scale_to_domain()?.save_image(
-                    &output_dir.join(&format!("{output_prefix}_level_{layer}_base.png")),
-                )?;
-
-                other_img.image_scale_to_domain()?.save_image(
-                    &output_dir.join(&format!("{output_prefix}_level_{layer}_kernel.png")),
-                )?;
-
-                {
-                    let h = base_img.isize(-2);
-                    let w = base_img.isize(-1);
-                    let options = flash_powder::factory::TensorOptions {
-                        dtype: Some(base_img.dtype()),
-                        device: Some(base_img.device()),
-                        ..Default::default()
-                    };
-                    let mut canvas: Tensor = Tensor::zeros(&[3, h, w], &options)?; // base_channels
-                    // Blit the base;
-                    canvas
-                        .i_mut((0, .., ..))?
-                        .copy_from_tensor(&base_img.squeeze()?)?;
-                    // And blit the other part
-                    canvas
-                        .i_mut((1, .., ..))?
-                        .copy_from_tensor(&other_img.squeeze()?)?;
-
-                    canvas.image_scale_to_domain()?.save_image(
-                        &output_dir.join(&format!("{output_prefix}_aligned_pre_{layer}.png")),
-                    )?;
-                }
+            if let Some((dir, prefix)) = debug_dir {
+                Self::dump_correlation(dir, prefix, layer, &base_img, &other_img, &conv2.ten()?)?;
             }
 
-            let (score, dx, dy) = conv_peak(&conv2)?;
+            let (_score, dx, dy) = conv_peak(&conv2)?;
             // best_value = value;
             pos.0 += dx * b.scale;
             pos.1 += dy * b.scale;
 
-            if let Some((output_dir, output_prefix)) = debug_dir {
-                let mut grid = GridOverlay::new();
-
-                let base_img = self
-                    .layers
-                    .last()
-                    .as_ref()
-                    .map(|z| z.data.ten().unwrap())
-                    .unwrap();
-                let other_img = self
-                    .layers
-                    .last()
-                    .as_ref()
-                    .map(|z| z.data.ten().unwrap())
-                    .unwrap();
-                let base_id = grid.add_tensor(&base_img, (0, 0));
-                let other_id = grid.add_tensor(&other_img, ((pos.0 / b.scale), (pos.1 / b.scale)));
-                let full = grid.full_size();
-                println!("full: {full:?}");
-                let options = flash_powder::factory::TensorOptions {
-                    dtype: Some(base_img.dtype()),
-                    device: Some(base_img.device()),
-                    ..Default::default()
-                };
-                let mut canvas: Tensor = Tensor::zeros(&[3, full.1, full.0], &options)?; // base_channels
-                // Blit the base;
-                let (bx, by) = grid.full_grid_irange(base_id);
-                canvas
-                    .i_mut((0, by, bx))?
-                    .copy_from_tensor(&base_img.squeeze()?)?;
-                // And blit the other part
-                let (bx, by) = grid.full_grid_irange(other_id);
-                canvas
-                    .i_mut((1, by, bx))?
-                    .copy_from_tensor(&other_img.squeeze()?)?;
-
-                canvas.image_scale_to_domain()?.save_image(
-                    &output_dir.join(&format!("{output_prefix}_aligned_{layer}.png")),
-                )?;
+            if let Some((dir, prefix)) = debug_dir {
+                let base_pos = (pos.0 / b.scale, pos.1 / b.scale);
+                Self::dump_alignment(dir, prefix, layer, &b.data.ten()?, &o.data.ten()?, base_pos)?;
             }
         }
 
         Ok((0, 0))
+    }
+
+    /// Saves the correlation output, both correlated crops, and their red/green overlay.
+    fn dump_correlation(
+        output_dir: &std::path::Path,
+        prefix: &str,
+        layer: usize,
+        base: &Ten<'_>,
+        other: &Ten<'_>,
+        conv: &Ten<'_>,
+    ) -> StableTorchResult<()> {
+        conv.image_scale_to_domain()?
+            .save_image(output_dir.join(format!("{prefix}_level_{layer}_conv.png")))?;
+        base.image_scale_to_domain()?
+            .save_image(output_dir.join(format!("{prefix}_level_{layer}_base.png")))?;
+        other
+            .image_scale_to_domain()?
+            .save_image(output_dir.join(format!("{prefix}_level_{layer}_kernel.png")))?;
+
+        let canvas = overlay_tensors(base, (0, 0), other, (0, 0))?;
+        canvas
+            .image_scale_to_domain()?
+            .save_image(output_dir.join(format!("{prefix}_aligned_pre_{layer}.png")))
+    }
+
+    /// Saves a red/green overlay of `base` (offset by `base_pos`) and `other` (at the origin).
+    fn dump_alignment(
+        output_dir: &std::path::Path,
+        prefix: &str,
+        layer: usize,
+        base: &Ten<'_>,
+        other: &Ten<'_>,
+        base_pos: (isize, isize),
+    ) -> StableTorchResult<()> {
+        let canvas = overlay_tensors(base, base_pos, other, (0, 0))?;
+        canvas
+            .image_scale_to_domain()?
+            .save_image(output_dir.join(format!("{prefix}_aligned_{layer}.png")))
     }
 }
 
@@ -203,4 +173,30 @@ fn conv_peak(conv: &Tensor) -> StableTorchResult<(f32, isize, isize)> {
     let width = conv.isize(-1) as isize;
     let (x, y) = (index % width, index / width);
     Ok((value, width / 2 - x, conv.isize(-2) as isize / 2 - y))
+}
+
+/// Composes `a` and `b` onto a single canvas (a in the red channel, b in the green channel),
+/// placed at the given positions, sized to their bounding box.
+fn overlay_tensors(
+    a: &Ten<'_>,
+    a_pos: (isize, isize),
+    b: &Ten<'_>,
+    b_pos: (isize, isize),
+) -> StableTorchResult<Tensor> {
+    let mut grid = GridOverlay::new();
+    let a_id = grid.add_tensor(a, a_pos);
+    let b_id = grid.add_tensor(b, b_pos);
+    let (w, h) = grid.full_size();
+
+    let options = flash_powder::factory::TensorOptions {
+        dtype: Some(a.dtype()),
+        device: Some(a.device()),
+        ..Default::default()
+    };
+    let mut canvas: Tensor = Tensor::zeros(&[3, h, w], &options)?;
+    let (ax, ay) = grid.full_grid_irange(a_id);
+    canvas.i_mut((0, ay, ax))?.copy_from_tensor(&a.squeeze()?)?;
+    let (bx, by) = grid.full_grid_irange(b_id);
+    canvas.i_mut((1, by, bx))?.copy_from_tensor(&b.squeeze()?)?;
+    Ok(canvas)
 }
