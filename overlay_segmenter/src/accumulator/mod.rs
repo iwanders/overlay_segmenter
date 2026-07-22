@@ -94,116 +94,17 @@ impl Accumulator {
             // weight; out_channels, in_channels/groups, kh, kw
             let other_pyramid = &self.pyramids[i];
             let this_frame_prefix = format!("{i}");
-            multi_res_stack.pyramid_aligner(
+            let (value, (x, y)) = multi_res_stack.pyramid_aligner(
                 &other_pyramid,
                 debug_dir.as_ref().map(|a| (*a, this_frame_prefix.as_str())),
             )?;
-
-            /*
-            let (base_xrange, base_yrange) =
-                if let Some(base_roi_size) = self.config.base_roi_size.as_ref() {
-                    let base_xrange = ((bf_w / 2) - base_roi_size.0 / 2) as isize
-                        ..((bf_w / 2) + base_roi_size.0 / 2) as isize;
-                    let base_yrange = ((bf_h / 2) - base_roi_size.1 / 2) as isize
-                        ..((bf_h / 2) + base_roi_size.1 / 2) as isize;
-                    (base_xrange, base_yrange)
-                } else {
-                    (0..bf_w as isize, 0..bf_h as isize)
-                };
-            dbg!(&base_xrange);
-            dbg!(&base_yrange);
-
-            let frame_xrange = ((frame_width / 2) - self.config.frame_roi_size.0 / 2) as isize
-                ..((frame_width / 2) + self.config.frame_roi_size.0 / 2) as isize;
-            let frame_yrange = ((frame_height / 2) - self.config.frame_roi_size.1 / 2) as isize
-                ..((frame_height / 2) + self.config.frame_roi_size.1 / 2) as isize;
-
-            let base_bg = base_frame
-                .i((0, 1..2, base_yrange.clone(), base_xrange.clone()))?
-                .unsqueeze(0)?;
-
-            let base_bg = base_bg.image_resize(
-                [base_yrange.len() / 2, base_xrange.len() / 2],
-                nn::functional::InterpolateAlgorithm::Bilinear,
-            )?;
-
-            let new_bg = frame
-                .i((0, 1..2, frame_yrange.clone(), frame_xrange.clone()))?
-                .unsqueeze(0)?
-                .to(&fp::DType::F32.into())?;
-
-            let new_bg = new_bg.image_resize(
-                [
-                    self.config.frame_roi_size.1 / 2,
-                    self.config.frame_roi_size.0 / 2,
-                ],
-                nn::functional::InterpolateAlgorithm::Bilinear,
-            )?;
-
-            println!("base shape: {:?}", base_bg.shape());
-            println!("new_bg shape: {:?}", new_bg.shape());
-            let options = nn::functional::Conv2dOptions {
-                // padding: (10, 10),
-                ..Default::default()
-            };
-            println!("running conv");
-            let conv2 = nn::functional::conv2d(&base_bg, &new_bg, None, &options)?;
-            // Get the peak, check if the peak is higher than current best match.
-
-            if let Some(output_dir) = debug_dir {
-                let path = output_dir.join(&format!("new_frame_{new_frame_index:?}_orig.png"));
-                frame.i((0, 1, .., ..))?.save_image(&path)?;
-
-                let img_norm = conv2.image_scale_to_domain()?;
-                let path = output_dir.join(&format!(
-                    "new_frame_{new_frame_index:?}_old_frame_{i}_conv.png"
-                ));
-                img_norm.save_image(&path)?;
-                base_bg
-                    .image_scale_to_domain()?
-                    .save_image(&output_dir.join(&format!(
-                        "new_frame_{new_frame_index:?}_old_frame_{i}_other_bg.png"
-                    )))?;
-                new_bg
-                    .image_scale_to_domain()?
-                    .save_image(&output_dir.join(&format!(
-                        "new_frame_{new_frame_index:?}_old_frame_{i}_new_bg.png"
-                    )))?;
-            }
-
-            let (values, indices) = conv2.flatten(0, None)?.topk(1, &Default::default())?;
-
-            let value = *values.cpu()?.as_f32()?;
-            let indices = indices.cpu()?;
-            let y = (*indices.as_i64()? as usize) / conv2.isize(-1);
-            let x = (*indices.as_i64()? as usize) % conv2.isize(-1);
-            // y_match = (i // output_size[1]).item()
-            // x_match = (i % output_size[1]).item()
-            // let rows = flat_indices // matrix.shape[1]
-            // cols = flat_indices % matrix.shape[1]
-            //
-            // But that's x at the ROI... and we want X for the full frame.
-            // Convolution start to frame start:
-            let base_conv_start_to_frame_x = -base_xrange.start;
-            let base_conv_start_to_frame_y = -base_yrange.start;
-            let other_conv_start_to_frame_x = -frame_xrange.start;
-            let other_conv_start_to_frame_y = -frame_yrange.start;
-
-            // Now, we can calculate the frame relation.
-            let x = ((base_conv_start_to_frame_x - other_conv_start_to_frame_x) - (x * 2) as isize);
-            let y = ((base_conv_start_to_frame_y - other_conv_start_to_frame_y) - (y * 2) as isize);
-
-            println!("shape conv2: {:?}", conv2.shape());
-            //println!("conv2: {:?}", conv2);
-            println!("values: {:?} {:?} {value}", values.shape(), values);
-            println!("indices: {:?} peak at {x},{y}", indices);
+            // Record the alignment of this new frame against the existing frame `i`.
             matches.push(FrameMatch {
                 frame_index: i,
-                value: value,
+                value,
                 x,
                 y,
             });
-            */
         }
 
         self.pyramids.push(multi_res_stack);

@@ -62,9 +62,10 @@ impl Pyramid {
         other: &Pyramid,
 
         debug_dir: Option<(&std::path::Path, &str)>,
-    ) -> StableTorchResult<(isize, isize)> {
+    ) -> StableTorchResult<(f32, (isize, isize))> {
         // Position of 'other' expressed in 'base', always in the full resolution scale.
         let mut pos: (isize, isize) = (0, 0);
+        let mut score = 0.0;
         // Go through the pyramids in reverse order, from small images to large.
         for (layer, (b, o)) in self
             .layers
@@ -108,8 +109,8 @@ impl Pyramid {
                 Self::dump_correlation(dir, prefix, layer, &base_img, &other_img, &conv2.ten()?)?;
             }
 
-            let (_score, dx, dy) = conv_peak(&conv2)?;
-            // best_value = value;
+            let (this_score, dx, dy) = conv_peak(&conv2)?;
+            score = this_score;
             pos.0 += dx * b.scale;
             pos.1 += dy * b.scale;
 
@@ -119,7 +120,7 @@ impl Pyramid {
             }
         }
 
-        Ok((0, 0))
+        Ok((score, (0, 0)))
     }
 
     /// Saves the correlation output, both correlated crops, and their red/green overlay.
