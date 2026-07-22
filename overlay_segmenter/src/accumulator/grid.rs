@@ -82,6 +82,7 @@ pub struct GridWindow {
     position: Position,
 }
 
+#[derive(Debug)]
 pub struct GridOverlay {
     windows: Vec<GridWindow>,
 }
@@ -128,6 +129,20 @@ impl GridOverlay {
         (min, max)
     }
 
+    pub fn overlap(&self) -> (Position, Position) {
+        if self.windows.is_empty() {
+            return (Position::origin(), Position::origin());
+        }
+        let mut min = self.windows.first().unwrap().position;
+        let mut max = self.windows.first().unwrap().position + self.windows.first().unwrap().size;
+        for w in self.windows.iter() {
+            min = min.max(w.position);
+            max = max.min(w.position + w.size)
+        }
+
+        (min, max)
+    }
+
     pub fn full_size(&self) -> (usize, usize) {
         let (min, max) = self.extent();
         let diff = max - min;
@@ -159,6 +174,22 @@ impl GridOverlay {
                 return (
                     this_pos.x..(this_pos.x + v.size.w as isize),
                     this_pos.y..(this_pos.y + v.size.h as isize),
+                );
+            }
+        }
+        unreachable!("grid id {grid:?} was passed, which doesn't originate from this GridOverlay");
+    }
+
+    /// Returns the area of this grid that is part of the overlap.
+    pub fn overlap_irange(&self, grid: GridId) -> (std::ops::Range<isize>, std::ops::Range<isize>) {
+        let (min, max) = self.overlap();
+
+        for (i, v) in self.windows.iter().enumerate() {
+            if i == grid.0 {
+                let this_pos = v.position;
+                return (
+                    min.x - this_pos.x..max.x - this_pos.x,
+                    min.y - this_pos.y..max.y - this_pos.y,
                 );
             }
         }
@@ -247,5 +278,32 @@ mod test {
         let o_in_full = o.full_grid_position(o_id);
         assert_eq!(o_in_full.0, 0);
         assert_eq!(o_in_full.1, 0);
+
+        // Those were all disjoint, so now lets make something that's not disjoint.
+        let base = (4, 5);
+        let base_pos = (-1, -1);
+        //  0  1  2  3 ;  0  1  2  3  4
+        // -1, 0, 1  2;  -1, 0, 1, 2, 3
+        let overlay = (3, 4);
+        let position = (1, 2);
+        // 0 1 2 ; 0 1 2 3
+        // 1 2 3 ; 2 3 4 5
+        let mut o = GridOverlay::new();
+        let b_id = o.add_grid_raw(base, base_pos);
+        let o_id = o.add_grid_raw(overlay, position);
+        let (min, max) = o.overlap();
+        assert_eq!(min.x, 1);
+        assert_eq!(min.y, 2);
+
+        // One beyond the overlap, of course.
+        assert_eq!(max.x, 3);
+        assert_eq!(max.y, 4);
+
+        let (b_overlap_x, b_overlap_y) = o.overlap_irange(b_id);
+        assert_eq!(b_overlap_x, 2..4);
+        assert_eq!(b_overlap_y, 3..5);
+        let (o_overlap_x, o_overlap_y) = o.overlap_irange(o_id);
+        assert_eq!(o_overlap_x, 0..2);
+        assert_eq!(o_overlap_y, 0..2);
     }
 }

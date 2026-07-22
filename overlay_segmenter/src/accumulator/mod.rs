@@ -5,6 +5,8 @@ use flash_powder_image::prelude::*;
 use std::path::Path;
 pub mod grid;
 use grid::GridOverlay;
+pub mod pyramid;
+use pyramid::Pyramid;
 
 use fp::StableTorchResult;
 
@@ -39,6 +41,7 @@ struct FrameRelation {
 #[derive(Debug, Clone)]
 pub struct Accumulator {
     frames: Vec<Tensor>,
+    pyramids: Vec<Pyramid>,
     frame_relations: Vec<FrameRelation>,
     config: AccumulatorConfig,
 }
@@ -46,6 +49,7 @@ impl Accumulator {
     pub fn new() -> Self {
         Self {
             frames: vec![],
+            pyramids: vec![],
             frame_relations: vec![],
             config: AccumulatorConfig::default(),
         }
@@ -65,6 +69,13 @@ impl Accumulator {
         // Should we do a softmax here? or do we just run with the raw logits?
         let frame = nn::functional::softmax_int(&frame, 1, None)?;
 
+        let multi_res_stack = pyramid::Pyramid::new(frame.i((0, 1, .., ..))?, 3)?;
+
+        let new_frame_prefix = format!("{new_frame_index}");
+
+        multi_res_stack
+            .dump_pyramid(debug_dir.as_ref().map(|a| (*a, new_frame_prefix.as_str())))?;
+
         // Currently, 0 background, 1 foreground.
         // Which means foreground+foreground adds, but background+foreground is not penalized.
         // Does that matter?
@@ -81,7 +92,14 @@ impl Accumulator {
             // Run the convolution, lets just do it by shape for now.
             // input;  minibatch, in_channels, iH, iW
             // weight; out_channels, in_channels/groups, kh, kw
+            let other_pyramid = &self.pyramids[i];
+            let this_frame_prefix = format!("{i}");
+            multi_res_stack.pyramid_aligner(
+                &other_pyramid,
+                debug_dir.as_ref().map(|a| (*a, this_frame_prefix.as_str())),
+            )?;
 
+            /*
             let (base_xrange, base_yrange) =
                 if let Some(base_roi_size) = self.config.base_roi_size.as_ref() {
                     let base_xrange = ((bf_w / 2) - base_roi_size.0 / 2) as isize
@@ -185,8 +203,10 @@ impl Accumulator {
                 x,
                 y,
             });
+            */
         }
 
+        self.pyramids.push(multi_res_stack);
         self.frames.push(frame);
         self.frame_relations.push(FrameRelation {
             frame_index: new_frame_index,
@@ -197,6 +217,7 @@ impl Accumulator {
     }
 
     pub fn debug_use_accumulation(&self, debug_dir: &Path) -> StableTorchResult<()> {
+        return Ok(());
         println!("{:#?}", self.frame_relations);
         // Lets just iterate over it all and add the pairs.
         for base in self.frame_relations.iter() {
