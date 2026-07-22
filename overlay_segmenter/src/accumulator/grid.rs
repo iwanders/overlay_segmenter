@@ -26,6 +26,12 @@ impl Position {
     }
 }
 
+impl From<Position> for (isize, isize) {
+    fn from(s: Position) -> Self {
+        (s.x, s.y)
+    }
+}
+
 impl std::ops::Add for Position {
     type Output = Self;
 
@@ -180,6 +186,14 @@ impl GridOverlay {
         unreachable!("grid id {grid:?} was passed, which doesn't originate from this GridOverlay");
     }
 
+    pub fn grid_position(&self, grid: GridId) -> Position {
+        for (i, v) in self.windows.iter().enumerate() {
+            if i == grid.0 {
+                return v.position;
+            }
+        }
+        unreachable!("grid id {grid:?} was passed, which doesn't originate from this GridOverlay");
+    }
     /// Returns the area of this grid that is part of the overlap.
     pub fn overlap_irange(&self, grid: GridId) -> (std::ops::Range<isize>, std::ops::Range<isize>) {
         let (min, max) = self.overlap();

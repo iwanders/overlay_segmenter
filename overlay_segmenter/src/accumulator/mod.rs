@@ -4,7 +4,7 @@ use flash_powder::{Device, Ten, Tensor, nn};
 use flash_powder_image::prelude::*;
 use std::path::Path;
 pub mod grid;
-use grid::GridOverlay;
+use grid::{GridOverlay, Position};
 pub mod pyramid;
 use pyramid::Pyramid;
 
@@ -28,8 +28,7 @@ impl Default for AccumulatorConfig {
 struct FrameMatch {
     pub frame_index: usize,
     pub value: f32,
-    pub x: isize,
-    pub y: isize,
+    pub pos: Position,
 }
 
 #[derive(Debug, Clone)]
@@ -94,7 +93,7 @@ impl Accumulator {
             // weight; out_channels, in_channels/groups, kh, kw
             let other_pyramid = &self.pyramids[i];
             let this_frame_prefix = format!("{i}");
-            let (value, (x, y)) = multi_res_stack.pyramid_aligner(
+            let (value, pos) = multi_res_stack.pyramid_aligner(
                 &other_pyramid,
                 debug_dir.as_ref().map(|a| (*a, this_frame_prefix.as_str())),
             )?;
@@ -102,8 +101,7 @@ impl Accumulator {
             matches.push(FrameMatch {
                 frame_index: i,
                 value,
-                x,
-                y,
+                pos,
             });
         }
 
@@ -118,54 +116,64 @@ impl Accumulator {
     }
 
     pub fn debug_use_accumulation(&self, debug_dir: &Path) -> StableTorchResult<()> {
-        return Ok(());
         println!("{:#?}", self.frame_relations);
-        // Lets just iterate over it all and add the pairs.
-        for base in self.frame_relations.iter() {
-            let base_frame = &self.frames[base.frame_index];
-            let base_channels = base_frame.isize(1);
-            let base_index = base.frame_index;
-            let t: Tensor = 0.5.try_into()?;
-            let base_bool = base_frame.i((0, 1, .., ..))?.ge(&t)?;
-            let base_bool_as_f = base_bool.to(&fp::DType::F32.into())?;
+
+        // Iterate over all the frames, collect the best scoring one, then create the composite.
+
+        let mut grid = GridOverlay::new();
+        let mut grid_ids = vec![];
+        for (i, base) in self.frame_relations.iter().enumerate() {
+            println!("frame {i}");
+
+            let mut best_entry: Option<(f32, Position, FrameMatch)> = None;
             for other in base.matches.iter() {
-                let other_frame = &self.frames[other.frame_index];
-                let other_bool = other_frame.i((0, 1, .., ..))?.ge(&t)?;
-                let other_index = other.frame_index;
+                if let Some((best_score, _, _)) = best_entry.as_ref() {
+                    if best_score < &other.value {
+                        best_entry = Some((other.value, other.pos, other.clone()));
+                    }
+                } else {
+                    best_entry = Some((other.value, other.pos, other.clone()));
+                }
+            }
 
-                // Lets combine these...
-                // We need to make a canvas using the offset... and size of both frames.
-                // We expressed everything in base.
-                let mut o = GridOverlay::new();
-                let base_id = o.add_tensor(base_frame, (0, 0));
-                let other_id = o.add_tensor(other_frame, (other.x, other.y));
+            if let Some((score, p, frame_match)) = best_entry {
+                println!(" score: {score}");
+                println!(" pos  : {p:?}");
+                println!(" to   : {:?}", frame_match.frame_index);
 
-                let full = o.full_size();
-                println!("full: {full:?}");
-                // Allocate the canvas;
-                let options = flash_powder::factory::TensorOptions {
-                    dtype: Some(base_frame.dtype()),
-                    device: Some(base_frame.device()),
-                    ..Default::default()
-                };
-                let mut canvas: Tensor = Tensor::zeros(&[3, full.1, full.0], &options)?; // base_channels
-                // Blit the base;
-                let (bx, by) = o.full_grid_irange(base_id);
-                canvas
-                    .i_mut((0, by, bx))?
-                    .copy_from_tensor(&base_bool_as_f)?;
-                let other_bool_as_f = other_bool.to(&fp::DType::F32.into())?;
-                // And blit the other part
-                let (bx, by) = o.full_grid_irange(other_id);
-                canvas
-                    .i_mut((1, by, bx))?
-                    .copy_from_tensor(&other_bool_as_f)?;
+                let parent_pos = grid.grid_position(grid_ids[frame_match.frame_index]);
 
-                canvas.image_scale_to_domain()?.save_image(
-                    &debug_dir.join(&format!("combine_{base_index}_with_{other_index}.png")),
-                )?;
+                grid_ids.push(grid.add_tensor(
+                    &self.frames[i].ten()?,
+                    (parent_pos + frame_match.pos).into(),
+                ));
+            } else {
+                grid_ids.push(grid.add_tensor(&self.frames[i].ten()?, (0, 0)));
             }
         }
+
+        // Stack the grid, round robin channel.
+        let (w, h) = grid.full_size();
+
+        let options = flash_powder::factory::TensorOptions {
+            dtype: Some(self.frames[0].dtype()),
+            device: Some(self.frames[0].device()),
+            ..Default::default()
+        };
+        let mut canvas: Tensor = Tensor::zeros(&[3, h, w], &options)?;
+
+        let mut channel = 0;
+        for (grid_id, frame) in grid_ids.iter().zip(self.frames.iter()) {
+            let (ax, ay) = grid.full_grid_irange(*grid_id);
+            canvas
+                .i_mut((channel, ay, ax))?
+                .copy_from_tensor(&frame.i((0, 1, .., ..))?.squeeze()?)?;
+            channel = (channel + 1) % 3;
+        }
+        canvas
+            .image_scale_to_domain()?
+            .save_image(debug_dir.join(format!("accumulated.png")))?;
+
         Ok(())
     }
 }

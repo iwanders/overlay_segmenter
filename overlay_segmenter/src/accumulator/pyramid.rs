@@ -1,4 +1,4 @@
-use super::{GridOverlay, grid::GridId};
+use super::{GridOverlay, Position, grid::GridId};
 use flash_powder::nn;
 use flash_powder::prelude::*;
 use flash_powder::{StableTorchResult, Ten, Tensor};
@@ -62,7 +62,7 @@ impl Pyramid {
         other: &Pyramid,
 
         debug_dir: Option<(&std::path::Path, &str)>,
-    ) -> StableTorchResult<(f32, (isize, isize))> {
+    ) -> StableTorchResult<(f32, Position)> {
         // Position of 'other' expressed in 'base', always in the full resolution scale.
         let mut pos: (isize, isize) = (0, 0);
         let mut score = 0.0;
@@ -120,7 +120,7 @@ impl Pyramid {
             }
         }
 
-        Ok((score, (0, 0)))
+        Ok((score, Position::new(pos.0, pos.1)))
     }
 
     /// Saves the correlation output, both correlated crops, and their red/green overlay.
