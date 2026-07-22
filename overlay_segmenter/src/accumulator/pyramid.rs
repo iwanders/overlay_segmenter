@@ -1,4 +1,4 @@
-use super::{GridOverlay, Position, grid::GridId};
+use super::{GridOverlay, Position};
 use flash_powder::nn;
 use flash_powder::prelude::*;
 use flash_powder::{StableTorchResult, Ten, Tensor};
@@ -200,4 +200,72 @@ fn overlay_tensors(
     let (bx, by) = grid.full_grid_irange(b_id);
     canvas.i_mut((1, by, bx))?.copy_from_tensor(&b.squeeze()?)?;
     Ok(canvas)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use flash_powder::DType;
+    use flash_powder::tensor::BlobOptionsBytes;
+
+    /// Builds an `h x w` f32 image with a filled disk of radius `r` centered at `(cx, cy)`.
+    fn circle_image(
+        h: usize,
+        w: usize,
+        cx: isize,
+        cy: isize,
+        r: isize,
+    ) -> StableTorchResult<Tensor> {
+        let mut data = vec![0f32; h * w];
+        for y in 0..h as isize {
+            for x in 0..w as isize {
+                let (ddx, ddy) = (x - cx, y - cy);
+                if ddx * ddx + ddy * ddy <= r * r {
+                    data[(y as usize) * w + (x as usize)] = 1.0;
+                }
+            }
+        }
+        let bytes: Vec<u8> = data.iter().flat_map(|v| v.to_ne_bytes()).collect();
+        let ten = Ten::from_bytes(
+            &bytes,
+            &BlobOptionsBytes {
+                sizes: &[h, w],
+                strides: &[w, 1],
+                dtype: DType::F32,
+            },
+        )?;
+        ten.to_owned()
+    }
+
+    #[test]
+    fn test_pyramid_aligner_recovers_offset() -> StableTorchResult<()> {
+        let (h, w) = (128usize, 128usize);
+        let r = 16;
+        // `other`'s disk is shifted by (+20, +12) in (x, y) relative to `base`'s.
+        let (shift_x, shift_y) = (20isize, 12isize);
+        let base = circle_image(h, w, 64, 64, r)?;
+        let other = circle_image(h, w, 64 + shift_x, 64 + shift_y, r)?;
+        other.save_image("/tmp/circle_other.png")?;
+
+        let base_p = Pyramid::new(base.ten()?, 3)?;
+        let other_p = Pyramid::new(other.ten()?, 3)?;
+
+        let (value, pos) = base_p.pyramid_aligner(&other_p, None)?;
+        println!("shift=({shift_x},{shift_y}) recovered=({pos:?}) value={value}");
+
+        // `pyramid_aligner` returns the position of `other` relative to `self`, so the
+        // recovered offset should equal the shift we applied (within a pixel).
+        assert!(
+            (pos.x - shift_x).abs() <= 1,
+            "dx={}, expected {shift_x}",
+            pos.x
+        );
+        assert!(
+            (pos.y - shift_y).abs() <= 1,
+            "dy={}, expected {shift_y}",
+            pos.y
+        );
+        assert!(value > 0.0);
+        Ok(())
+    }
 }
