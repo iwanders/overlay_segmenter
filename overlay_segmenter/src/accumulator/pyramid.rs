@@ -63,6 +63,7 @@ impl Pyramid {
 
         debug_dir: Option<(&std::path::Path, &str)>,
     ) -> StableTorchResult<(isize, isize)> {
+        // Position of 'other' expressed in 'base', always in the full resolution scale.
         let mut pos: (isize, isize) = (0, 0);
         // Go through the pyramids in reverse order, from small images to large.
         for (layer, (b, o)) in self
@@ -75,54 +76,33 @@ impl Pyramid {
             println!();
             println!("Global pos {pos:?}");
 
-            // Layer 0 is a bit special, since there we just pad on all sides with the entire image size >_<
-            // All other layers we only really need to do 4 left and right? which we can just do by chopping the borders
-            // off the kernel.
-
-            println!("b.date shape: {:?}", b.data.shape());
-            println!("o.date shape: {:?}", o.data.shape());
             let base_img = b.data.ten()?;
             let other_img = o.data.ten()?;
 
-            let options = if layer == 0 {
-                // Padding here is
-                nn::functional::Conv2dOptions {
-                    padding: (b.data.isize(-2) as i64 / 2, b.data.isize(-1) as i64 / 2),
-                    ..Default::default()
-                }
+            let (base_img, other_img, padding) = if layer == 0 {
+                // At the first layer we do a full search, with half the dimensions of padding, this ensures that we try
+                // all the overlap, but only at this resolution.
+                let padding = (base_img.isize(-2) as i64 / 2, base_img.isize(-1) as i64 / 2);
+                (base_img, other_img, padding)
             } else {
-                nn::functional::Conv2dOptions {
-                    padding: (20, 20), // 4 or 2?
-                    ..Default::default()
-                }
-            };
-            let (base_img, other_img) = if layer == 0 {
-                (base_img, other_img)
-            } else {
+                // At the other layers, we do a more minimal search with just the padding that we need to compensate
+                // of the resolution loss.
+                let base_pos = (pos.0 / b.scale, pos.1 / b.scale);
                 let mut grid = GridOverlay::new();
-                let base_id = grid.add_tensor(
-                    &base_img,
-                    ((pos.0 / (b.scale as isize)), (pos.1 / (b.scale as isize))),
-                );
+                let base_id = grid.add_tensor(&base_img, base_pos);
                 let other_id = grid.add_tensor(&other_img, (0, 0));
-                let (base_overlap_x, base_overlap_y) = grid.overlap_irange(base_id);
-                let (other_overlap_x, other_overlap_y) = grid.overlap_irange(other_id);
-
-                // That's in the previous dimension though, so next we need to scale that by two, and then we can slice.
-
-                let base_overlap_x = base_overlap_x.start..base_overlap_x.end;
-                let base_overlap_y = base_overlap_y.start..base_overlap_y.end;
-                let other_overlap_x = other_overlap_x.start..other_overlap_x.end;
-                let other_overlap_y = other_overlap_y.start..other_overlap_y.end;
-
-                let base_img = base_img.i((.., .., base_overlap_y, base_overlap_x))?;
-                let other_img = other_img.i((.., .., other_overlap_y, other_overlap_x))?;
-
-                (base_img, other_img)
+                let (bx, by) = grid.overlap_irange(base_id);
+                let (ox, oy) = grid.overlap_irange(other_id);
+                let base_img = base_img.i((.., .., by, bx))?;
+                let other_img = other_img.i((.., .., oy, ox))?;
+                (base_img, other_img, (SEARCH_PADDING, SEARCH_PADDING))
             };
 
+            let options = nn::functional::Conv2dOptions {
+                padding,
+                ..Default::default()
+            };
             let conv2 = nn::functional::conv2d(&base_img, &other_img, None, &options)?;
-            // Get the peak, check if the peak is higher than current best match.
 
             if let Some((output_dir, output_prefix)) = debug_dir {
                 let img_norm = conv2.image_scale_to_domain()?;
@@ -160,17 +140,10 @@ impl Pyramid {
                 }
             }
 
-            // let (values, indices) = conv2.flatten(0, None)?.topk(1, &Default::default())?;
-
             let (score, dx, dy) = conv_peak(&conv2)?;
             // best_value = value;
             pos.0 += dx * b.scale;
             pos.1 += dy * b.scale;
-
-            // y_match = (i // output_size[1]).item()
-            // x_match = (i % output_size[1]).item()
-            // let rows = flat_indices // matrix.shape[1]
-            // cols = flat_indices % matrix.shape[1]
 
             if let Some((output_dir, output_prefix)) = debug_dir {
                 let mut grid = GridOverlay::new();
@@ -187,7 +160,6 @@ impl Pyramid {
                     .as_ref()
                     .map(|z| z.data.ten().unwrap())
                     .unwrap();
-                let scale = 1;
                 let base_id = grid.add_tensor(&base_img, (0, 0));
                 let other_id = grid.add_tensor(&other_img, ((pos.0 / b.scale), (pos.1 / b.scale)));
                 let full = grid.full_size();
@@ -220,7 +192,7 @@ impl Pyramid {
 }
 
 /// Bounded search radius (in pixels) used when refining an estimate at the finer layers.
-const SEARCH_PADDING: i64 = 20;
+const SEARCH_PADDING: i64 = 2;
 
 /// Returns the `(value, dx, dy)` of a correlation's peak, where `dx`/`dy` are offsets from
 /// the centre of the correlation output.
