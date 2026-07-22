@@ -74,9 +74,6 @@ impl Pyramid {
             .zip(other.layers.iter().rev())
             .enumerate()
         {
-            println!();
-            println!("Global pos {pos:?}");
-
             let base_img = b.data.ten()?;
             let other_img = o.data.ten()?;
 

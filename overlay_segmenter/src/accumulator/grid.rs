@@ -157,7 +157,7 @@ impl GridOverlay {
 
     /// Returns the position of this grid in the full size coordinates.
     pub fn full_grid_position(&self, grid: GridId) -> (usize, usize) {
-        let (min, max) = self.extent();
+        let (min, _max) = self.extent();
         for (i, v) in self.windows.iter().enumerate() {
             if i == grid.0 {
                 let pos = v.position;

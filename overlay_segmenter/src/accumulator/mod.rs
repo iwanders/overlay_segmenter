@@ -1,6 +1,6 @@
 use flash_powder as fp;
 use flash_powder::prelude::*;
-use flash_powder::{Device, Ten, Tensor, nn};
+use flash_powder::{Ten, Tensor, nn};
 use flash_powder_image::prelude::*;
 use std::path::Path;
 pub mod grid;
@@ -11,20 +11,6 @@ use pyramid::Pyramid;
 use fp::StableTorchResult;
 
 #[derive(Debug, Copy, Clone)]
-pub struct AccumulatorConfig {
-    pub base_roi_size: Option<(usize, usize)>,
-    pub frame_roi_size: (usize, usize),
-}
-impl Default for AccumulatorConfig {
-    fn default() -> Self {
-        Self {
-            base_roi_size: None,
-            frame_roi_size: (512, 512),
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
 struct FrameMatch {
     pub frame_index: usize,
     pub value: f32,
@@ -33,7 +19,6 @@ struct FrameMatch {
 
 #[derive(Debug, Clone)]
 struct FrameRelation {
-    pub frame_index: usize,
     pub matches: Vec<FrameMatch>,
 }
 
@@ -42,7 +27,6 @@ pub struct Accumulator {
     frames: Vec<Tensor>,
     pyramids: Vec<Pyramid>,
     frame_relations: Vec<FrameRelation>,
-    config: AccumulatorConfig,
 }
 impl Accumulator {
     pub fn new() -> Self {
@@ -50,7 +34,6 @@ impl Accumulator {
             frames: vec![],
             pyramids: vec![],
             frame_relations: vec![],
-            config: AccumulatorConfig::default(),
         }
     }
     pub fn feed_logits_frame(
@@ -59,9 +42,6 @@ impl Accumulator {
 
         debug_dir: Option<&Path>,
     ) -> StableTorchResult<()> {
-        dbg!();
-        let frame_width = frame.shape()[3];
-        let frame_height = frame.shape()[2];
         let new_frame_index = self.frames.len();
         let frame = frame.to(&fp::DType::F32.into())?;
 
@@ -75,22 +55,10 @@ impl Accumulator {
         multi_res_stack
             .dump_pyramid(debug_dir.as_ref().map(|a| (*a, new_frame_prefix.as_str())))?;
 
-        // Currently, 0 background, 1 foreground.
-        // Which means foreground+foreground adds, but background+foreground is not penalized.
-        // Does that matter?
-        //
-        // Currently we pick the new frame center... but that's sub par ideally we'd select the area of the current frame
-        // where we have a lot of information.
-
         // Compare it against all the existing frames, because why not.
+        // Hmm, we should probably just compare against a running composite...
         let mut matches = vec![];
-        for (i, base_frame) in self.frames.iter().enumerate() {
-            dbg!();
-            let bf_w = base_frame.shape()[3];
-            let bf_h = base_frame.shape()[2];
-            // Run the convolution, lets just do it by shape for now.
-            // input;  minibatch, in_channels, iH, iW
-            // weight; out_channels, in_channels/groups, kh, kw
+        for (i, _base_frame) in self.frames.iter().enumerate() {
             let other_pyramid = &self.pyramids[i];
             let this_frame_prefix = format!("{i}");
             let (value, pos) = multi_res_stack.pyramid_aligner(
@@ -107,19 +75,13 @@ impl Accumulator {
 
         self.pyramids.push(multi_res_stack);
         self.frames.push(frame);
-        self.frame_relations.push(FrameRelation {
-            frame_index: new_frame_index,
-            matches,
-        });
+        self.frame_relations.push(FrameRelation { matches });
 
         Ok(())
     }
 
     pub fn debug_use_accumulation(&self, debug_dir: &Path) -> StableTorchResult<()> {
-        println!("{:#?}", self.frame_relations);
-
         // Iterate over all the frames, collect the best scoring one, then create the composite.
-
         let mut grid = GridOverlay::new();
         let mut grid_ids = vec![];
         for (i, base) in self.frame_relations.iter().enumerate() {
