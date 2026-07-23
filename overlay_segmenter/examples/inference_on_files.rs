@@ -62,6 +62,7 @@ pub fn main() -> Result<(), anyhow::Error> {
             .as_ref()
             .cloned()
             .unwrap_or(path.parent().unwrap().to_owned());
+        std::fs::create_dir_all(&output_path)?;
 
         let img = Tensor::read_image(&path)?.image_floatify(&device.into())?;
         let channels_stacked = img.to(&unet.dtype().into())?;
