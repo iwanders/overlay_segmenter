@@ -141,12 +141,14 @@ impl Accumulator {
         Ok(())
     }
 
-    pub fn write_file<Q: AsRef<Path>>(&mut self, output_path: Q) -> StableTorchResult<()> {
-        // self.pyramids.clear();
-        // self.frame_relations.clear();
-        // self.frames.clear();
+    pub fn write_postcard<Q: AsRef<Path>>(&mut self, output_path: Q) -> StableTorchResult<()> {
         let data = postcard::to_allocvec(self)?;
         println!("dta is {:?}", data.len());
         std::fs::write(output_path, &data).map_err(|e| anyhow::format_err!(e))
+    }
+    pub fn read_postcard<Q: AsRef<Path>>(output_path: Q) -> StableTorchResult<Self> {
+        let data = std::fs::read(output_path).map_err(|e| anyhow::format_err!(e))?;
+        let v: Self = postcard::from_bytes(&data)?;
+        Ok(v)
     }
 }

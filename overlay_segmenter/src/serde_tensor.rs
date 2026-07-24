@@ -13,17 +13,17 @@ pub mod tensor {
     where
         S: Serializer,
     {
-        // 3u32.serialize(serializer)
-
         let mut d = flash_powder::nn::StateDict::default();
-        // Todo; how does this result in such a poor error??
+        // How does this result in such a poor error?? Because postcard hides it.
+        // https://github.com/jamesmunns/postcard/issues/38
         // let data = data.clone();
         let data = data.clone().cpu().map_err(|a| S::Error::custom(a))?;
         let value = flash_powder::nn::Data::Parameter(data);
         d.add_data("tensor", value)
             .map_err(|a| S::Error::custom(a))?;
-        let t = d.serialize_safetensors().map_err(|a| S::Error::custom(a))?;
-        // t.serialize(serializer)
+        let e = d.serialize_safetensors();
+        let t = e.map_err(|a| S::Error::custom(a))?;
+
         serde_bytes::serialize(&t, serializer)
     }
 
@@ -32,9 +32,6 @@ pub mod tensor {
     where
         D: Deserializer<'de>,
     {
-        // let v = u32::deserialize(deserializer);
-        // return Ok(3.3.try_into().unwrap());
-
         let bytes: Vec<u8> = serde_bytes::deserialize(deserializer)?;
         let s = flash_powder::nn::StateDict::deserialize_safetensors(&bytes, &Default::default())
             .map_err(|a| D::Error::custom(a))?;
@@ -96,7 +93,6 @@ pub mod vec_tensor {
 #[cfg(test)]
 mod test {
     use super::*;
-    use flash_powder::prelude::*;
 
     #[test]
     fn test_serde_tensor() -> Result<(), anyhow::Error> {

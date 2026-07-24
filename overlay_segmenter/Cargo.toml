@@ -8,8 +8,9 @@ edition = "2024"
 flash_powder = { git = "https://github.com/iwanders/flash_powder.git", version = "0.1.0", features = ["cuda" ] }
 flash_powder_safetensors = { git = "https://github.com/iwanders/flash_powder.git", version = "0.1.0" }
 flash_powder_image = { git = "https://github.com/iwanders/flash_powder.git", version = "0.1.0" }
-#flash_powder = { path="../../../torch_stable_rs/repo/flash_powder", features = ["cuda", "v2_13"] }
+#flash_powder = { path="../../../torch_stable_rs/repo/flash_powder", features = ["cuda" ] }
 #flash_powder_safetensors = { path="../../../torch_stable_rs/repo/flash_powder_safetensors" }
+#flash_powder_image = { path="../../../torch_stable_rs/repo/flash_powder_image" }
 
 [dependencies]
 

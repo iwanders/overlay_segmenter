@@ -124,7 +124,7 @@ pub fn main() -> Result<(), anyhow::Error> {
             accumulator.debug_use_accumulation(&path)?;
         }
         if let Some(write_path) = args.accumulate_write.as_ref() {
-            accumulator.write_file(&write_path)?;
+            accumulator.write_postcard(&write_path)?;
         }
     }
 
