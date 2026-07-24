@@ -23,6 +23,7 @@ flash_powder_image = {workspace=true}
 serde={version="1", features=["derive"]}
 serde_json={version="1" }
 serde_bytes = {version="0.11"}
+postcard = {version="1", features=["use-std", "alloc"]}
 
 [build-dependencies]
 flash_powder = {workspace=true}

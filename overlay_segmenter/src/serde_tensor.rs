@@ -12,6 +12,8 @@ pub mod tensor {
     where
         S: Serializer,
     {
+        // 3u32.serialize(serializer)
+
         let mut d = flash_powder::nn::StateDict::default();
         d.add_data("tensor", flash_powder::nn::Data::Parameter(data.clone()))
             .map_err(|a| S::Error::custom(a))?;
@@ -24,6 +26,9 @@ pub mod tensor {
     where
         D: Deserializer<'de>,
     {
+        // let v = u32::deserialize(deserializer);
+        // return Ok(3.3.try_into().unwrap());
+
         let bytes: Vec<u8> = serde_bytes::deserialize(deserializer)?;
         let s = flash_powder::nn::StateDict::deserialize_safetensors(&bytes, &Default::default())
             .map_err(|a| D::Error::custom(a))?;
@@ -125,6 +130,29 @@ mod test {
         assert!(bar.t[0].is_equal(&back.t[0])?);
         assert!(bar.t[1].is_equal(&back.t[1])?);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_serde_tensor_postcard() -> Result<(), anyhow::Error> {
+        let a_in: Tensor = [-3.5f32, -2.0, -1.3, 1.0, 5.0, 3.0].try_into()?;
+        let b_in: Tensor = [-3.0f32, -3.0, -1.0, 1.0, 2.0, 3.0].try_into()?;
+        #[derive(Debug, Clone, Deserialize, Serialize)]
+        struct Bar {
+            #[serde(with = "crate::serde_tensor::vec_tensor")]
+            t: Vec<Tensor>,
+        }
+
+        let bar = Bar {
+            t: vec![a_in, b_in],
+        };
+        let v: Vec<u8> = postcard::to_allocvec(&bar)?;
+        println!("String: {v:?}");
+
+        let back: Bar = postcard::from_bytes(&v)?;
+        assert_eq!(bar.t.len(), back.t.len());
+        assert!(bar.t[0].is_equal(&back.t[0])?);
+        assert!(bar.t[1].is_equal(&back.t[1])?);
         Ok(())
     }
 }

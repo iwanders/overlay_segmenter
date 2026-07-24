@@ -31,6 +31,10 @@ struct Args {
     /// Run the accumulator
     #[arg(short, long)]
     accumulate: bool,
+
+    /// Path to write the aligned data to.
+    #[arg(long)]
+    accumulate_write: Option<PathBuf>,
 }
 
 pub fn main() -> Result<(), anyhow::Error> {
@@ -118,6 +122,9 @@ pub fn main() -> Result<(), anyhow::Error> {
     if let Some(accumulator) = accumulator.as_mut() {
         if let Some(path) = args.output.as_ref() {
             accumulator.debug_use_accumulation(&path)?;
+        }
+        if let Some(write_path) = args.accumulate_write.as_ref() {
+            accumulator.write_file(&write_path)?;
         }
     }
 

@@ -23,9 +23,9 @@ struct FrameRelation {
     pub matches: Vec<FrameMatch>,
 }
 
-// , Deserialize, Serialize
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Accumulator {
+    #[serde(with = "crate::serde_tensor::vec_tensor")]
     frames: Vec<Tensor>,
     pyramids: Vec<Pyramid>,
     frame_relations: Vec<FrameRelation>,
@@ -139,5 +139,11 @@ impl Accumulator {
             .save_image(debug_dir.join(format!("accumulated.png")))?;
 
         Ok(())
+    }
+
+    pub fn write_file<Q: AsRef<Path>>(&self, output_path: Q) -> StableTorchResult<()> {
+        let data = postcard::to_allocvec(self)?;
+        println!("dta is {:?}", data.len());
+        std::fs::write(output_path, &data).map_err(|e| anyhow::format_err!(e))
     }
 }
