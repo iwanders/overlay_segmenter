@@ -2,9 +2,9 @@ pub use flash_powder;
 use flash_powder as fp;
 use flash_powder::{Device, Tensor, nn};
 use nn::module::Module;
-pub mod palette;
-
 pub mod model;
+pub mod palette;
+pub mod serde_tensor;
 use model::{UNet, UNetOptions};
 
 pub mod accumulator;

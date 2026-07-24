@@ -1,5 +1,6 @@
 use flash_powder::prelude::*;
-#[derive(Copy, Clone, Debug)]
+use serde::{Deserialize, Serialize};
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub struct Position {
     pub x: isize,
     pub y: isize,
@@ -53,7 +54,7 @@ impl std::ops::Sub for Position {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub struct Rect {
     pub w: usize,
     pub h: usize,
@@ -79,16 +80,16 @@ impl std::ops::Add<Position> for Rect {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub struct GridId(usize);
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub struct GridWindow {
     size: Rect,
     position: Position,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct GridOverlay {
     windows: Vec<GridWindow>,
 }

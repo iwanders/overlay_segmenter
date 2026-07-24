@@ -3,15 +3,17 @@ use flash_powder::nn;
 use flash_powder::prelude::*;
 use flash_powder::{StableTorchResult, Ten, Tensor};
 use flash_powder_image::prelude::*;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct Layer {
     scale: isize,
+    #[serde(with = "crate::serde_tensor::tensor")]
     data: Tensor,
 }
 
 /// A multiresolution image stack.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Pyramid {
     layers: Vec<Layer>,
 }

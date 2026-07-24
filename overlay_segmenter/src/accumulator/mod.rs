@@ -7,21 +7,23 @@ pub mod grid;
 use grid::{GridOverlay, Position};
 pub mod pyramid;
 use pyramid::Pyramid;
+use serde::{Deserialize, Serialize};
 
 use fp::StableTorchResult;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
 struct FrameMatch {
     pub frame_index: usize,
     pub value: f32,
     pub pos: Position,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct FrameRelation {
     pub matches: Vec<FrameMatch>,
 }
 
+// , Deserialize, Serialize
 #[derive(Debug, Clone)]
 pub struct Accumulator {
     frames: Vec<Tensor>,

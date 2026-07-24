@@ -413,7 +413,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 [[package]]
 name = "flash_powder"
 version = "0.1.0"
-source = "git+https://github.com/iwanders/flash_powder.git#056bc381849e00131046f9fa470f135a5ee43971"
+source = "git+https://github.com/iwanders/flash_powder.git#b48c0c6147d8be11e26bc5c6928fa205bbc58e32"
 dependencies = [
  "anyhow",
  "tinyvec",
@@ -424,7 +424,7 @@ dependencies = [
 [[package]]
 name = "flash_powder_image"
 version = "0.1.0"
-source = "git+https://github.com/iwanders/flash_powder.git#056bc381849e00131046f9fa470f135a5ee43971"
+source = "git+https://github.com/iwanders/flash_powder.git#b48c0c6147d8be11e26bc5c6928fa205bbc58e32"
 dependencies = [
  "anyhow",
  "flash_powder",
@@ -436,10 +436,11 @@ dependencies = [
 [[package]]
 name = "flash_powder_safetensors"
 version = "0.1.0"
-source = "git+https://github.com/iwanders/flash_powder.git#056bc381849e00131046f9fa470f135a5ee43971"
+source = "git+https://github.com/iwanders/flash_powder.git#b48c0c6147d8be11e26bc5c6928fa205bbc58e32"
 dependencies = [
  "anyhow",
  "flash_powder",
+ "memmap2",
  "safetensors",
  "torch_stable",
 ]
@@ -671,6 +672,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "memmap2"
+version = "0.9.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -803,6 +813,9 @@ dependencies = [
  "flash_powder_safetensors",
  "image",
  "screen_capture",
+ "serde",
+ "serde_bytes",
+ "serde_json",
 ]
 
 [[package]]
@@ -1107,6 +1120,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_bytes"
+version = "0.11.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5d440709e79d88e51ac01c4b72fc6cb7314017bb7da9eeff678aa94c10e3ea8"
+dependencies = [
+ "serde",
+ "serde_core",
+]
+
+[[package]]
 name = "serde_core"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1265,7 +1288,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 [[package]]
 name = "torch_stable"
 version = "0.1.0"
-source = "git+https://github.com/iwanders/flash_powder.git#056bc381849e00131046f9fa470f135a5ee43971"
+source = "git+https://github.com/iwanders/flash_powder.git#b48c0c6147d8be11e26bc5c6928fa205bbc58e32"
 dependencies = [
  "anyhow",
  "cc",
