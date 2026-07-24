@@ -20,7 +20,7 @@ struct FrameMatch {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct FrameRelation {
-    pub matches: Vec<FrameMatch>,
+    matches: Vec<FrameMatch>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -141,7 +141,10 @@ impl Accumulator {
         Ok(())
     }
 
-    pub fn write_file<Q: AsRef<Path>>(&self, output_path: Q) -> StableTorchResult<()> {
+    pub fn write_file<Q: AsRef<Path>>(&mut self, output_path: Q) -> StableTorchResult<()> {
+        // self.pyramids.clear();
+        // self.frame_relations.clear();
+        // self.frames.clear();
         let data = postcard::to_allocvec(self)?;
         println!("dta is {:?}", data.len());
         std::fs::write(output_path, &data).map_err(|e| anyhow::format_err!(e))

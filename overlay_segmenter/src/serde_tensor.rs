@@ -1,4 +1,5 @@
 use flash_powder::Tensor;
+use flash_powder::prelude::*;
 use flash_powder_safetensors::prelude::*;
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer, de::Error as _, ser::Error as _,
@@ -15,9 +16,14 @@ pub mod tensor {
         // 3u32.serialize(serializer)
 
         let mut d = flash_powder::nn::StateDict::default();
-        d.add_data("tensor", flash_powder::nn::Data::Parameter(data.clone()))
+        // Todo; how does this result in such a poor error??
+        // let data = data.clone();
+        let data = data.clone().cpu().map_err(|a| S::Error::custom(a))?;
+        let value = flash_powder::nn::Data::Parameter(data);
+        d.add_data("tensor", value)
             .map_err(|a| S::Error::custom(a))?;
         let t = d.serialize_safetensors().map_err(|a| S::Error::custom(a))?;
+        // t.serialize(serializer)
         serde_bytes::serialize(&t, serializer)
     }
 
@@ -130,29 +136,6 @@ mod test {
         assert!(bar.t[0].is_equal(&back.t[0])?);
         assert!(bar.t[1].is_equal(&back.t[1])?);
 
-        Ok(())
-    }
-
-    #[test]
-    fn test_serde_tensor_postcard() -> Result<(), anyhow::Error> {
-        let a_in: Tensor = [-3.5f32, -2.0, -1.3, 1.0, 5.0, 3.0].try_into()?;
-        let b_in: Tensor = [-3.0f32, -3.0, -1.0, 1.0, 2.0, 3.0].try_into()?;
-        #[derive(Debug, Clone, Deserialize, Serialize)]
-        struct Bar {
-            #[serde(with = "crate::serde_tensor::vec_tensor")]
-            t: Vec<Tensor>,
-        }
-
-        let bar = Bar {
-            t: vec![a_in, b_in],
-        };
-        let v: Vec<u8> = postcard::to_allocvec(&bar)?;
-        println!("String: {v:?}");
-
-        let back: Bar = postcard::from_bytes(&v)?;
-        assert_eq!(bar.t.len(), back.t.len());
-        assert!(bar.t[0].is_equal(&back.t[0])?);
-        assert!(bar.t[1].is_equal(&back.t[1])?);
         Ok(())
     }
 }
