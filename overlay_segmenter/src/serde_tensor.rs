@@ -40,10 +40,7 @@ pub mod vec_tensor {
     use super::*;
 
     #[derive(Deserialize, Serialize)]
-    struct TensorWrapper {
-        #[serde(with = "crate::serde_tensor::tensor")]
-        t: Tensor,
-    }
+    struct TensorWrapper(#[serde(with = "crate::serde_tensor::tensor")] Tensor);
 
     pub fn serialize<S>(data: &[Tensor], serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -51,12 +48,11 @@ pub mod vec_tensor {
     {
         let mut seq = serializer.serialize_seq(Some(data.len()))?;
         for item in data {
-            seq.serialize_element(&TensorWrapper { t: item.clone() })?;
+            seq.serialize_element(&TensorWrapper(item.clone()))?;
         }
         seq.end()
     }
 
-    // Deserialize sequence back into a Vec<T>
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Tensor>, D::Error>
     where
         D: Deserializer<'de>,
@@ -76,7 +72,7 @@ pub mod vec_tensor {
             {
                 let mut values = Vec::new();
                 while let Some(item) = seq.next_element::<TensorWrapper>()? {
-                    values.push(item.t);
+                    values.push(item.0);
                 }
                 Ok(values)
             }
