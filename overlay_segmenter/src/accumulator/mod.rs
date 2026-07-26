@@ -146,15 +146,19 @@ impl Accumulator {
         Ok(())
     }
 
+    // This currently breaks down as we don't account for the 'revealed' area, and only sections that are in view
+    // longer than they are obscured will work, results for those is super crisp though.
     pub fn combined_avg(&self) -> StableTorchResult<Tensor> {
         let grid = self.create_grid()?;
         // Stack the grid, round robin channel.
         let (w, h) = grid.full_size();
         let channels = self.frames.first().map(|a| a.isize(-3)).unwrap_or(0);
         // let batch = self.frames.first().map(|a| a.isize(-4)).unwrap_or(0);
+        let fdtype = self.frames[0].dtype();
+        println!("fdtype: {fdtype:?}");
 
         let options = flash_powder::factory::TensorOptions {
-            dtype: Some(self.frames[0].dtype()),
+            dtype: Some(fdtype),
             device: Some(self.frames[0].device()),
             ..Default::default()
         };
@@ -204,7 +208,7 @@ impl Accumulator {
         let positions_with_zero = counts.eq(&zero)?.squeeze()?.to_owned()?;
         let zeros_made_into_ones_but_counts_else = counts.add(&positions_with_zero)?;
 
-        let r = canvas.div(&zeros_made_into_ones_but_counts_else)?;
+        let r = canvas.div(&zeros_made_into_ones_but_counts_else.to(&fdtype.into())?)?;
 
         Ok(r)
     }
