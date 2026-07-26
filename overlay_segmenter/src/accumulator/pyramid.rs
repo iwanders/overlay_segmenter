@@ -201,40 +201,40 @@ fn overlay_tensors(
     Ok(canvas)
 }
 
+use flash_powder::DType;
+use flash_powder::tensor::BlobOptionsBytes;
+/// Builds an `h x w` f32 image with a filled disk of radius `r` centered at `(cx, cy)`.
+pub(crate) fn circle_image(
+    h: usize,
+    w: usize,
+    cx: isize,
+    cy: isize,
+    r: isize,
+) -> StableTorchResult<Tensor> {
+    let mut data = vec![0f32; h * w];
+    for y in 0..h as isize {
+        for x in 0..w as isize {
+            let (ddx, ddy) = (x - cx, y - cy);
+            if ddx * ddx + ddy * ddy <= r * r {
+                data[(y as usize) * w + (x as usize)] = 1.0;
+            }
+        }
+    }
+    let bytes: Vec<u8> = data.iter().flat_map(|v| v.to_ne_bytes()).collect();
+    let ten = Ten::from_bytes(
+        &bytes,
+        &BlobOptionsBytes {
+            sizes: &[h, w],
+            strides: &[w, 1],
+            dtype: DType::F32,
+        },
+    )?;
+    ten.to_owned()
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use flash_powder::DType;
-    use flash_powder::tensor::BlobOptionsBytes;
-
-    /// Builds an `h x w` f32 image with a filled disk of radius `r` centered at `(cx, cy)`.
-    fn circle_image(
-        h: usize,
-        w: usize,
-        cx: isize,
-        cy: isize,
-        r: isize,
-    ) -> StableTorchResult<Tensor> {
-        let mut data = vec![0f32; h * w];
-        for y in 0..h as isize {
-            for x in 0..w as isize {
-                let (ddx, ddy) = (x - cx, y - cy);
-                if ddx * ddx + ddy * ddy <= r * r {
-                    data[(y as usize) * w + (x as usize)] = 1.0;
-                }
-            }
-        }
-        let bytes: Vec<u8> = data.iter().flat_map(|v| v.to_ne_bytes()).collect();
-        let ten = Ten::from_bytes(
-            &bytes,
-            &BlobOptionsBytes {
-                sizes: &[h, w],
-                strides: &[w, 1],
-                dtype: DType::F32,
-            },
-        )?;
-        ten.to_owned()
-    }
 
     #[test]
     fn test_pyramid_aligner_recovers_offset() -> StableTorchResult<()> {

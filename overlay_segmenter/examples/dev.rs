@@ -26,7 +26,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     let debug_out = std::path::PathBuf::from(&"/tmp/debug_out/");
     accumulator.debug_use_accumulation(&debug_out)?;
 
-    let combined = accumulator.combined_avg()?;
+    let combined = accumulator.combined_avg(&debug_out)?;
     println!("combined: {combined:?}");
     combined
         .i((1, .., ..))?

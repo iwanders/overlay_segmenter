@@ -146,9 +146,45 @@ impl Accumulator {
         Ok(())
     }
 
+    fn inflated_non_zero_present(&self, frame: Ten<'_>) -> StableTorchResult<Tensor> {
+        let indices_at_pixel = frame.squeeze()?.argmax(Some(0), Some(true))?;
+        let zero_i64: Tensor = 0i64.try_into()?;
+        let zero_f32: Tensor = 0.0f32.try_into()?;
+        let non_bg = indices_at_pixel.ne(&zero_i64)?;
+
+        // Next, we convert that back to float sand convolute it with the inflation.
+        let non_bg_f32 = non_bg.to(&fp::DType::F32.into())?;
+
+        let convolution_circle = pyramid::circle_image(21, 21, 10, 10, 10)?;
+        convolution_circle
+            .image_scale_to_domain()?
+            .save_image("/tmp/convolution_kernel.png")?;
+
+        // Next, do the actual convolution.
+        let padding = (10, 10);
+        let options = nn::functional::Conv2dOptions {
+            padding,
+            ..Default::default()
+        };
+        let non_bg_f32 = non_bg_f32.unsqueeze(0)?;
+        let conv_mask = convolution_circle.unsqueeze(0)?.unsqueeze(0)?;
+        println!("non_bg_f32 shape: {:?}", non_bg_f32.shape());
+        println!("conv_mask shape: {:?}", conv_mask.shape());
+        let conv2 = nn::functional::conv2d(&non_bg_f32, &conv_mask, None, &options)?;
+        conv2
+            .image_scale_to_domain()?
+            .save_image("/tmp/conv_result.png")?;
+
+        let boolean_mask = conv2.gt(&zero_f32)?;
+        let non_bg = boolean_mask.squeeze()?;
+        println!("non_bg shape: {:?}", non_bg.shape());
+        Ok(non_bg.to_owned()?)
+    }
+
     // This currently breaks down as we don't account for the 'revealed' area, and only sections that are in view
     // longer than they are obscured will work, results for those is super crisp though.
-    pub fn combined_avg(&self) -> StableTorchResult<Tensor> {
+    // Count should use an inflated boolean mask around non-background.
+    pub fn combined_avg(&self, debug_dir: &Path) -> StableTorchResult<Tensor> {
         let grid = self.create_grid()?;
         // Stack the grid, round robin channel.
         let (w, h) = grid.full_size();
@@ -193,8 +229,14 @@ impl Accumulator {
             // Then add the counts.
             let current_values = counts.i((.., ay.clone(), ax.clone()))?;
             println!("current_values shape: {:?}", current_values.shape());
-            let with_addition =
-                current_values.add(&counts_one.i((.., ay.clone(), ax.clone()))?)?;
+            // let with_addition =
+            //     current_values.add(&counts_one.i((.., ay.clone(), ax.clone()))?)?;
+            let presence_mask_with_ones = self.inflated_non_zero_present(frame.ten()?)?;
+            presence_mask_with_ones
+                .image_scale_to_domain()?
+                .save_image(debug_dir.join(format!("presence_mask_with_ones_{:?}.png", grid_id)))?;
+
+            let with_addition = current_values.add(&presence_mask_with_ones)?;
             println!("with_addition shape: {:?}", with_addition.shape());
             counts
                 .i_mut((.., ay, ax))?
