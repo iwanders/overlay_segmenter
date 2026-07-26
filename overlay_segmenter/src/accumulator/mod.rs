@@ -219,16 +219,10 @@ impl Accumulator {
 
         for (grid_id, frame) in grid.ids().zip(self.frames.iter()) {
             let (ax, ay) = grid.full_grid_irange(grid_id);
-            // First add the actual values.
-            let current_values = canvas.i((.., ay.clone(), ax.clone()))?;
-            let with_addition = current_values.add(&frame.squeeze()?)?;
-            canvas
-                .i_mut((.., ay.clone(), ax.clone()))?
-                .copy_from_tensor(&with_addition)?;
 
             // Then add the counts.
-            let current_values = counts.i((.., ay.clone(), ax.clone()))?;
-            println!("current_values shape: {:?}", current_values.shape());
+            let current_counts = counts.i((.., ay.clone(), ax.clone()))?;
+            println!("current_values shape: {:?}", current_counts.shape());
             // let with_addition =
             //     current_values.add(&counts_one.i((.., ay.clone(), ax.clone()))?)?;
             let presence_mask_with_ones = self.inflated_non_zero_present(frame.ten()?)?;
@@ -236,21 +230,42 @@ impl Accumulator {
                 .image_scale_to_domain()?
                 .save_image(debug_dir.join(format!("presence_mask_with_ones_{:?}.png", grid_id)))?;
 
-            let with_addition = current_values.add(&presence_mask_with_ones)?;
+            let with_addition = current_counts.add(&presence_mask_with_ones)?;
             println!("with_addition shape: {:?}", with_addition.shape());
             counts
-                .i_mut((.., ay, ax))?
+                .i_mut((.., ay.clone(), ax.clone()))?
+                .copy_from_tensor(&with_addition)?;
+
+            // Next, we can add the values, but we also multiply those by the mask we just created.
+            // Such that we only consider points in the vicinity.
+            let current_values = canvas.i((.., ay.clone(), ax.clone()))?;
+            let with_addition =
+                current_values.add(&frame.squeeze()?.mul(&presence_mask_with_ones)?)?;
+            canvas
+                .i_mut((.., ay.clone(), ax.clone()))?
                 .copy_from_tensor(&with_addition)?;
         }
 
         // Now that we are here, we can divide the actual values by the counts... and we should get a pristine image.
-        // Acounts contains zeros, which is a problem as it blows up the values to nan.
+        // Acounts contains zeros, which is a problem as it blows up the values to nan, so on the locations where the
+        // count is actually zero, we just add one, this shouldn't matter as the values there should be zero.
         let zero: Tensor = 0i64.try_into()?;
         //let all_positive_ones = counts.ne(&zero)?.squeeze()?.to_owned()?;
         let positions_with_zero = counts.eq(&zero)?.squeeze()?.to_owned()?;
         let zeros_made_into_ones_but_counts_else = counts.add(&positions_with_zero)?;
+        zeros_made_into_ones_but_counts_else
+            .image_scale_to_domain()?
+            .save_image(debug_dir.join(format!("zeros_made_into_ones_but_counts_else.png")))?;
 
         let r = canvas.div(&zeros_made_into_ones_but_counts_else.to(&fdtype.into())?)?;
+
+        // We can do this to further clean it up, forcing two observations to be present.
+        if false {
+            let two: Tensor = 2i64.try_into()?;
+            let positions_with_twos = counts.ge(&two)?.squeeze()?.to_owned()?;
+            let r = r.mul(&positions_with_twos)?;
+            return Ok(r);
+        }
 
         Ok(r)
     }
