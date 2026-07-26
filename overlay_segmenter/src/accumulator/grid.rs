@@ -97,6 +97,10 @@ impl GridOverlay {
     pub fn new() -> Self {
         Self { windows: vec![] }
     }
+    pub fn ids(&self) -> impl Iterator<Item = GridId> {
+        (0..self.windows.len()).into_iter().map(|a| GridId(a))
+    }
+
     /// Add a grid.
     pub fn add_grid_raw(&mut self, size: (usize, usize), position: (isize, isize)) -> GridId {
         let id = GridId(self.windows.len());

@@ -82,7 +82,7 @@ impl Accumulator {
         Ok(())
     }
 
-    pub fn debug_use_accumulation(&self, debug_dir: &Path) -> StableTorchResult<()> {
+    fn create_grid(&self) -> StableTorchResult<GridOverlay> {
         // Iterate over all the frames, collect the best scoring one, then create the composite.
         let mut grid = GridOverlay::new();
         let mut grid_ids = vec![];
@@ -116,6 +116,11 @@ impl Accumulator {
             }
         }
 
+        Ok(grid)
+    }
+
+    pub fn debug_use_accumulation(&self, debug_dir: &Path) -> StableTorchResult<()> {
+        let grid = self.create_grid()?;
         // Stack the grid, round robin channel.
         let (w, h) = grid.full_size();
 
@@ -127,8 +132,8 @@ impl Accumulator {
         let mut canvas: Tensor = Tensor::zeros(&[3, h, w], &options)?;
 
         let mut channel = 0;
-        for (grid_id, frame) in grid_ids.iter().zip(self.frames.iter()) {
-            let (ax, ay) = grid.full_grid_irange(*grid_id);
+        for (grid_id, frame) in grid.ids().zip(self.frames.iter()) {
+            let (ax, ay) = grid.full_grid_irange(grid_id);
             canvas
                 .i_mut((channel, ay, ax))?
                 .copy_from_tensor(&frame.i((0, 1, .., ..))?.squeeze()?)?;
@@ -139,6 +144,69 @@ impl Accumulator {
             .save_image(debug_dir.join(format!("accumulated.png")))?;
 
         Ok(())
+    }
+
+    pub fn combined_avg(&self) -> StableTorchResult<Tensor> {
+        let grid = self.create_grid()?;
+        // Stack the grid, round robin channel.
+        let (w, h) = grid.full_size();
+        let channels = self.frames.first().map(|a| a.isize(-3)).unwrap_or(0);
+        // let batch = self.frames.first().map(|a| a.isize(-4)).unwrap_or(0);
+
+        let options = flash_powder::factory::TensorOptions {
+            dtype: Some(self.frames[0].dtype()),
+            device: Some(self.frames[0].device()),
+            ..Default::default()
+        };
+        let mut canvas: Tensor = Tensor::zeros(&[channels, h, w], &options)?;
+        let mut counts: Tensor = Tensor::zeros(
+            &[1, h, w],
+            &flash_powder::factory::TensorOptions {
+                dtype: Some(fp::DType::I64),
+                device: Some(self.frames[0].device()),
+                ..Default::default()
+            },
+        )?;
+        let counts_one = Tensor::ones(
+            &[1, h, w],
+            &flash_powder::factory::TensorOptions {
+                dtype: Some(fp::DType::I64),
+                device: Some(self.frames[0].device()),
+                ..Default::default()
+            },
+        )?;
+        println!("counts_one shape: {:?}", counts_one.shape());
+
+        for (grid_id, frame) in grid.ids().zip(self.frames.iter()) {
+            let (ax, ay) = grid.full_grid_irange(grid_id);
+            // First add the actual values.
+            let current_values = canvas.i((.., ay.clone(), ax.clone()))?;
+            let with_addition = current_values.add(&frame.squeeze()?)?;
+            canvas
+                .i_mut((.., ay.clone(), ax.clone()))?
+                .copy_from_tensor(&with_addition)?;
+
+            // Then add the counts.
+            let current_values = counts.i((.., ay.clone(), ax.clone()))?;
+            println!("current_values shape: {:?}", current_values.shape());
+            let with_addition =
+                current_values.add(&counts_one.i((.., ay.clone(), ax.clone()))?)?;
+            println!("with_addition shape: {:?}", with_addition.shape());
+            counts
+                .i_mut((.., ay, ax))?
+                .copy_from_tensor(&with_addition)?;
+        }
+
+        // Now that we are here, we can divide the actual values by the counts... and we should get a pristine image.
+        // Acounts contains zeros, which is a problem as it blows up the values to nan.
+        let zero: Tensor = 0i64.try_into()?;
+        //let all_positive_ones = counts.ne(&zero)?.squeeze()?.to_owned()?;
+        let positions_with_zero = counts.eq(&zero)?.squeeze()?.to_owned()?;
+        let zeros_made_into_ones_but_counts_else = counts.add(&positions_with_zero)?;
+
+        let r = canvas.div(&zeros_made_into_ones_but_counts_else)?;
+
+        Ok(r)
     }
 
     pub fn write_postcard<Q: AsRef<Path>>(&mut self, output_path: Q) -> StableTorchResult<()> {
