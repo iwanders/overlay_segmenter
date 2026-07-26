@@ -146,52 +146,67 @@ impl Accumulator {
         Ok(())
     }
 
-    fn inflated_non_zero_present(&self, frame: Ten<'_>) -> StableTorchResult<Tensor> {
+    fn inflated_non_zero_present(
+        &self,
+        frame: Ten<'_>,
+        area_radius: usize,
+    ) -> StableTorchResult<Tensor> {
         let indices_at_pixel = frame.squeeze()?.argmax(Some(0), Some(true))?;
         let zero_i64: Tensor = 0i64.try_into()?;
+        let zero_i64 = zero_i64.to(&indices_at_pixel.device().into())?;
         let zero_f32: Tensor = 0.0f32.try_into()?;
+        let zero_f32 = zero_f32.to(&indices_at_pixel.device().into())?;
         let non_bg = indices_at_pixel.ne(&zero_i64)?;
 
         // Next, we convert that back to float sand convolute it with the inflation.
         let non_bg_f32 = non_bg.to(&fp::DType::F32.into())?;
 
-        let convolution_circle = pyramid::circle_image(21, 21, 10, 10, 10)?;
-        convolution_circle
-            .image_scale_to_domain()?
-            .save_image("/tmp/convolution_kernel.png")?;
+        let convolution_circle = pyramid::circle_image(
+            area_radius * 2 + 1,
+            area_radius * 2 + 1,
+            area_radius as isize,
+            area_radius as isize,
+            area_radius as isize,
+        )?;
+        let convolution_circle = convolution_circle.to(&frame.device().into())?;
+        // convolution_circle
+        //     .image_scale_to_domain()?
+        //     .save_image("/tmp/convolution_kernel.png")?;
 
         // Next, do the actual convolution.
-        let padding = (10, 10);
+        let padding = (area_radius as _, area_radius as _);
         let options = nn::functional::Conv2dOptions {
             padding,
             ..Default::default()
         };
         let non_bg_f32 = non_bg_f32.unsqueeze(0)?;
         let conv_mask = convolution_circle.unsqueeze(0)?.unsqueeze(0)?;
-        println!("non_bg_f32 shape: {:?}", non_bg_f32.shape());
-        println!("conv_mask shape: {:?}", conv_mask.shape());
+
         let conv2 = nn::functional::conv2d(&non_bg_f32, &conv_mask, None, &options)?;
-        conv2
-            .image_scale_to_domain()?
-            .save_image("/tmp/conv_result.png")?;
+        // conv2
+        //     .image_scale_to_domain()?
+        //     .save_image("/tmp/conv_result.png")?;
 
         let boolean_mask = conv2.gt(&zero_f32)?;
         let non_bg = boolean_mask.squeeze()?;
-        println!("non_bg shape: {:?}", non_bg.shape());
         Ok(non_bg.to_owned()?)
     }
 
     // This currently breaks down as we don't account for the 'revealed' area, and only sections that are in view
     // longer than they are obscured will work, results for those is super crisp though.
     // Count should use an inflated boolean mask around non-background.
-    pub fn combined_avg(&self, debug_dir: &Path) -> StableTorchResult<Tensor> {
+    pub fn combined_avg(
+        &self,
+        area_radius: usize,
+        min_observations: usize,
+        debug_dir: Option<&Path>,
+    ) -> StableTorchResult<Tensor> {
         let grid = self.create_grid()?;
         // Stack the grid, round robin channel.
         let (w, h) = grid.full_size();
         let channels = self.frames.first().map(|a| a.isize(-3)).unwrap_or(0);
         // let batch = self.frames.first().map(|a| a.isize(-4)).unwrap_or(0);
         let fdtype = self.frames[0].dtype();
-        println!("fdtype: {fdtype:?}");
 
         let options = flash_powder::factory::TensorOptions {
             dtype: Some(fdtype),
@@ -207,31 +222,25 @@ impl Accumulator {
                 ..Default::default()
             },
         )?;
-        let counts_one = Tensor::ones(
-            &[1, h, w],
-            &flash_powder::factory::TensorOptions {
-                dtype: Some(fp::DType::I64),
-                device: Some(self.frames[0].device()),
-                ..Default::default()
-            },
-        )?;
-        println!("counts_one shape: {:?}", counts_one.shape());
 
         for (grid_id, frame) in grid.ids().zip(self.frames.iter()) {
             let (ax, ay) = grid.full_grid_irange(grid_id);
 
             // Then add the counts.
             let current_counts = counts.i((.., ay.clone(), ax.clone()))?;
-            println!("current_values shape: {:?}", current_counts.shape());
             // let with_addition =
             //     current_values.add(&counts_one.i((.., ay.clone(), ax.clone()))?)?;
-            let presence_mask_with_ones = self.inflated_non_zero_present(frame.ten()?)?;
-            presence_mask_with_ones
-                .image_scale_to_domain()?
-                .save_image(debug_dir.join(format!("presence_mask_with_ones_{:?}.png", grid_id)))?;
+            let presence_mask_with_ones =
+                self.inflated_non_zero_present(frame.ten()?, area_radius)?;
+            if let Some(debug_dir) = debug_dir {
+                presence_mask_with_ones
+                    .image_scale_to_domain()?
+                    .save_image(
+                        debug_dir.join(format!("presence_mask_with_ones_{:?}.png", grid_id)),
+                    )?;
+            }
 
             let with_addition = current_counts.add(&presence_mask_with_ones)?;
-            println!("with_addition shape: {:?}", with_addition.shape());
             counts
                 .i_mut((.., ay.clone(), ax.clone()))?
                 .copy_from_tensor(&with_addition)?;
@@ -250,18 +259,20 @@ impl Accumulator {
         // Acounts contains zeros, which is a problem as it blows up the values to nan, so on the locations where the
         // count is actually zero, we just add one, this shouldn't matter as the values there should be zero.
         let zero: Tensor = 0i64.try_into()?;
-        //let all_positive_ones = counts.ne(&zero)?.squeeze()?.to_owned()?;
         let positions_with_zero = counts.eq(&zero)?.squeeze()?.to_owned()?;
         let zeros_made_into_ones_but_counts_else = counts.add(&positions_with_zero)?;
-        zeros_made_into_ones_but_counts_else
-            .image_scale_to_domain()?
-            .save_image(debug_dir.join(format!("zeros_made_into_ones_but_counts_else.png")))?;
+
+        if let Some(debug_dir) = debug_dir {
+            zeros_made_into_ones_but_counts_else
+                .image_scale_to_domain()?
+                .save_image(debug_dir.join(format!("zeros_made_into_ones_but_counts_else.png")))?;
+        }
 
         let r = canvas.div(&zeros_made_into_ones_but_counts_else.to(&fdtype.into())?)?;
 
-        // We can do this to further clean it up, forcing two observations to be present.
-        if false {
-            let two: Tensor = 2i64.try_into()?;
+        // We can do this to further clean it up, accepting only data where 'n' observations were present.
+        if min_observations >= 2 {
+            let two: Tensor = (min_observations as i64).try_into()?;
             let positions_with_twos = counts.ge(&two)?.squeeze()?.to_owned()?;
             let r = r.mul(&positions_with_twos)?;
             return Ok(r);
@@ -279,5 +290,22 @@ impl Accumulator {
         let data = std::fs::read(output_path).map_err(|e| anyhow::format_err!(e))?;
         let v: Self = postcard::from_bytes(&data)?;
         Ok(v)
+    }
+
+    pub fn into_device(mut self, device: fp::Device) -> StableTorchResult<Self> {
+        let mut frames = vec![];
+        for f in self.frames.drain(..) {
+            frames.push(f.to(&device.into())?);
+        }
+        let mut pyramids = vec![];
+        for p in self.pyramids.drain(..) {
+            pyramids.push(p.into_device(device)?);
+        }
+
+        Ok(Self {
+            frames,
+            pyramids,
+            frame_relations: self.frame_relations,
+        })
     }
 }

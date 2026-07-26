@@ -1,4 +1,5 @@
 use super::{GridOverlay, Position};
+use flash_powder as fp;
 use flash_powder::nn;
 use flash_powder::prelude::*;
 use flash_powder::{StableTorchResult, Ten, Tensor};
@@ -158,6 +159,17 @@ impl Pyramid {
         canvas
             .image_scale_to_domain()?
             .save_image(output_dir.join(format!("{prefix}_aligned_{layer}.png")))
+    }
+
+    pub fn into_device(mut self, device: fp::Device) -> StableTorchResult<Self> {
+        let mut layers = vec![];
+        for layer in self.layers.drain(..) {
+            layers.push(Layer {
+                scale: layer.scale,
+                data: layer.data.to(&device.into())?,
+            });
+        }
+        Ok(Self { layers })
     }
 }
 
