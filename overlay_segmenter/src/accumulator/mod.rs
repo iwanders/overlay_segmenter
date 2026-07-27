@@ -1,6 +1,6 @@
 use flash_powder as fp;
 use flash_powder::prelude::*;
-use flash_powder::{Ten, Tensor, nn};
+use flash_powder::{Ten, TenMut, Tensor, nn};
 use flash_powder_image::prelude::*;
 use std::path::Path;
 pub mod grid;
@@ -19,8 +19,23 @@ struct FrameMatch {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-struct FrameRelation {
+pub struct FrameRelation {
     matches: Vec<FrameMatch>,
+}
+impl FrameRelation {
+    fn best_match(&self) -> Option<(f32, Position, FrameMatch)> {
+        let mut best_entry: Option<(f32, Position, FrameMatch)> = None;
+        for other in self.matches.iter() {
+            if let Some((best_score, _, _)) = best_entry.as_ref() {
+                if best_score < &other.value {
+                    best_entry = Some((other.value, other.pos, other.clone()));
+                }
+            } else {
+                best_entry = Some((other.value, other.pos, other.clone()));
+            }
+        }
+        best_entry
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -89,16 +104,7 @@ impl Accumulator {
         for (i, base) in self.frame_relations.iter().enumerate() {
             println!("frame {i}");
 
-            let mut best_entry: Option<(f32, Position, FrameMatch)> = None;
-            for other in base.matches.iter() {
-                if let Some((best_score, _, _)) = best_entry.as_ref() {
-                    if best_score < &other.value {
-                        best_entry = Some((other.value, other.pos, other.clone()));
-                    }
-                } else {
-                    best_entry = Some((other.value, other.pos, other.clone()));
-                }
-            }
+            let best_entry: Option<(f32, Position, FrameMatch)> = base.best_match();
 
             if let Some((score, p, frame_match)) = best_entry {
                 println!(" score: {score}");
@@ -146,11 +152,7 @@ impl Accumulator {
         Ok(())
     }
 
-    fn inflated_non_zero_present(
-        &self,
-        frame: Ten<'_>,
-        area_radius: usize,
-    ) -> StableTorchResult<Tensor> {
+    fn inflated_non_zero_present(frame: Ten<'_>, area_radius: usize) -> StableTorchResult<Tensor> {
         let indices_at_pixel = frame.squeeze()?.argmax(Some(0), Some(true))?;
         let zero_i64: Tensor = 0i64.try_into()?;
         let zero_i64 = zero_i64.to(&indices_at_pixel.device().into())?;
@@ -231,7 +233,7 @@ impl Accumulator {
             // let with_addition =
             //     current_values.add(&counts_one.i((.., ay.clone(), ax.clone()))?)?;
             let presence_mask_with_ones =
-                self.inflated_non_zero_present(frame.ten()?, area_radius)?;
+                Self::inflated_non_zero_present(frame.ten()?, area_radius)?;
             if let Some(debug_dir) = debug_dir {
                 presence_mask_with_ones
                     .image_scale_to_domain()?
@@ -307,5 +309,65 @@ impl Accumulator {
             pyramids,
             frame_relations: self.frame_relations,
         })
+    }
+    pub fn frame_count(&self) -> usize {
+        self.frames.len()
+    }
+
+    pub fn pop_left(&mut self) -> Option<(Tensor, FrameRelation, Pyramid)> {
+        if self.frame_count() > 1 {
+            Some((
+                self.frames.remove(0),
+                self.frame_relations.remove(0),
+                self.pyramids.remove(0),
+            ))
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
+pub struct AccumulationConfig {
+    pub fit_against_previous_frames: usize,
+    pub min_observations: usize,
+    pub radius: usize,
+}
+
+struct AccumulationTensors {
+    frame: Tensor,
+    counts: Tensor,
+}
+
+pub struct LiveAccumulator {
+    config: AccumulationConfig,
+    accumulator: Accumulator,
+    accumulation: Option<AccumulationTensors>,
+}
+
+impl LiveAccumulator {
+    pub fn new(config: AccumulationConfig) -> Self {
+        Self {
+            config,
+            accumulator: Accumulator::new(),
+            accumulation: None,
+        }
+    }
+    pub fn feed_logits_frame(
+        &mut self,
+        frame: &Ten<'_>,
+
+        debug_dir: Option<&Path>,
+    ) -> StableTorchResult<()> {
+        self.accumulator.feed_logits_frame(frame, debug_dir)?;
+
+        let frame_count = self.accumulator.frame_count();
+
+        if frame_count > self.config.fit_against_previous_frames {
+            // Remove the first frame, and merge it with our current accumulation.
+            // But to merge, we need the
+        }
+
+        Ok(())
     }
 }
