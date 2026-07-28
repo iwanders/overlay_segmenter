@@ -63,6 +63,11 @@ class PostProcess:
                     postprocess_config.config,
                     ratio=postprocess_config.ratio,
                 )
+            case "downscale":
+                return PostprocessDownscale(
+                    postprocess_config.config,
+                    ratio=postprocess_config.ratio,
+                )
             case _ as missing:
                 raise NotImplementedError(f"Not implemented postprocess: {missing}")
 
@@ -177,6 +182,26 @@ class PostprocessResizeRoundtrip(PostProcess):
             downscaled, current_resolution
         )
         return upscaled
+
+class PostprocessDownscale(PostProcess):
+    def __init__(self, config, ratio):
+        super().__init__(ratio)
+        self._factor = config["factor"]
+
+    def apply(self, rng: np.random.Generator, tensor: Tensor) -> Tensor:
+        if not self.should_apply(rng):
+            return tensor 
+    
+        small_resolution = ( 
+            int(tensor.shape[-2] / self._factor),
+            int(tensor.shape[-1] / self._factor),
+        )
+        
+        tensor = tensor.unsqueeze(0)
+        downscaled = torchvision.transforms.functional.resize(tensor, small_resolution, interpolation=torchvision.transforms.InterpolationMode.NEAREST)
+        downscaled = downscaled.squeeze()
+        
+        return downscaled
 
 
 class PostprocessHsvTransform(PostProcess):

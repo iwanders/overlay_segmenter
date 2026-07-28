@@ -175,6 +175,11 @@ data_config:
                     - <<: *text_color
                     - <<: *brightness_clamp
             ratio: 1.0
+        downscale_postproc:
+            function: downscale
+            config:
+                factor: 2
+            ratio: 1.0
 
     # Named image applicators, these do the position sampling, any postprocessing steps on their individual
     # to be stamped image and then apply the image to the output being created.
@@ -308,3 +313,6 @@ data_config:
               - fine_blur
               - jpeg
               - fine_blur_jpg
+              - downscale_postproc
+          post_process_mask:
+              - downscale_postproc

@@ -68,6 +68,7 @@ class DataStack(BaseModel):
 
     # List of postprocessing actions, mapping to DataPostprocess
     post_process: list[str] = []
+    post_process_mask: list[str] = []
 
 
 class GlyphsetConfig(BaseModel):

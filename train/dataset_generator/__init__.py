@@ -498,11 +498,13 @@ class DataGenerator:
         config: DataStack,
         device: torch.device,
         post_processors: list[PostProcess],
+        post_processors_mask: list[PostProcess],
     ):
         self._stack = stack
         self._config = config
         self._device = device
         self._post_processors = post_processors
+        self._post_processors_mask = post_processors_mask
 
     def generate(self, rng: np.random.Generator) -> (Tensor, Tensor):
         canvas = None
@@ -545,6 +547,10 @@ class DataGenerator:
         # Perform postprocessing.
         for post_processor in self._post_processors:
             canvas = post_processor.apply(rng, canvas)
+
+        # Perform postprocessing.
+        for post_processor in self._post_processors_mask:
+            mask = post_processor.apply(rng, mask)
 
         return canvas, mask
 
@@ -815,13 +821,17 @@ class DataPipeline:
                     typed_stack.append((applicator, overlay_source))
                 # Collect postprocessors
                 post_processors = []
+                post_processors_mask = []
                 for post_process_name in config.post_process:
                     post_processors.append(self._postprocess[post_process_name])
+                for post_process_name in config.post_process_mask:
+                    post_processors_mask.append(self._postprocess[post_process_name])
                 generator = DataGenerator(
                     typed_stack,
                     config=config,
                     device=self._device,
                     post_processors=post_processors,
+                    post_processors_mask=post_processors_mask,
                 )
                 self._generators.append(generator)
 
