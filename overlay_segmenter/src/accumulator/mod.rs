@@ -11,6 +11,43 @@ use serde::{Deserialize, Serialize};
 
 use fp::StableTorchResult;
 
+/*
+
+
+Currently, this works by:
+    Take logit frame
+        Softmax
+        Convolute against previous frames, capture score, pos,
+        store frame and positions against previous frames.
+    Accumulate:
+        Iterate over all the frames
+        Position each frame relative to its parent (best scoring relation)
+        Do the whole masked merge.
+
+
+We want do to this all in a live way, so not keep around all the frames.
+    We could keep around the logit sum + counts, and do the masking on that at the end.
+    In which case we'd use the Accumulator to keep a sliding window.
+
+    tick    :              0            1             2             3            4
+    frame 0                <-------------------------->
+    frame 1                             <-------------------------->
+    frame 2                                           <-------------------------->
+                                        ^
+                                        merge frame 1 away
+    We can keep frame relations for frames that are merged away I guess... we only need to keep the history on the left
+    side... Then we can pick the best out of the history, and then update the anchor of the accumulator and remove
+    a frame?
+
+    In the overall accumulator we can keep \sigma softmax(logits), counts
+
+
+
+Keep the total accumulated result away from the logit frames, otherwise the total result becomes slower and slower
+as time goes on and map size grows? But at the cost of drift... maybe we should anchor against the accumulated result?
+
+*/
+
 #[derive(Debug, Copy, Clone, Deserialize, Serialize)]
 struct FrameMatch {
     pub frame_index: usize,
@@ -38,6 +75,48 @@ impl FrameRelation {
     }
 }
 
+fn inflated_non_zero_present(frame: Ten<'_>, area_radius: usize) -> StableTorchResult<Tensor> {
+    let indices_at_pixel = frame.squeeze()?.argmax(Some(0), Some(true))?;
+    let zero_i64: Tensor = 0i64.try_into()?;
+    let zero_i64 = zero_i64.to(&indices_at_pixel.device().into())?;
+    let zero_f32: Tensor = 0.0f32.try_into()?;
+    let zero_f32 = zero_f32.to(&indices_at_pixel.device().into())?;
+    let non_bg = indices_at_pixel.ne(&zero_i64)?;
+
+    // Next, we convert that back to float sand convolute it with the inflation.
+    let non_bg_f32 = non_bg.to(&fp::DType::F32.into())?;
+
+    let convolution_circle = pyramid::circle_image(
+        area_radius * 2 + 1,
+        area_radius * 2 + 1,
+        area_radius as isize,
+        area_radius as isize,
+        area_radius as isize,
+    )?;
+    let convolution_circle = convolution_circle.to(&frame.device().into())?;
+    // convolution_circle
+    //     .image_scale_to_domain()?
+    //     .save_image("/tmp/convolution_kernel.png")?;
+
+    // Next, do the actual convolution.
+    let padding = (area_radius as _, area_radius as _);
+    let options = nn::functional::Conv2dOptions {
+        padding,
+        ..Default::default()
+    };
+    let non_bg_f32 = non_bg_f32.unsqueeze(0)?;
+    let conv_mask = convolution_circle.unsqueeze(0)?.unsqueeze(0)?;
+
+    let conv2 = nn::functional::conv2d(&non_bg_f32, &conv_mask, None, &options)?;
+    // conv2
+    //     .image_scale_to_domain()?
+    //     .save_image("/tmp/conv_result.png")?;
+
+    let boolean_mask = conv2.gt(&zero_f32)?;
+    let non_bg = boolean_mask.squeeze()?;
+    Ok(non_bg.to_owned()?)
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Accumulator {
     #[serde(with = "crate::serde_tensor::vec_tensor")]
@@ -53,6 +132,7 @@ impl Accumulator {
             frame_relations: vec![],
         }
     }
+
     pub fn feed_logits_frame(
         &mut self,
         frame: &Ten<'_>,
@@ -65,7 +145,9 @@ impl Accumulator {
         // Should we do a softmax here? or do we just run with the raw logits?
         let frame = nn::functional::softmax_int(&frame, 1, None)?;
 
-        let multi_res_stack = pyramid::Pyramid::new(frame.i((0, 1, .., ..))?, 3)?;
+        // Layer count 3 = 30
+        // layer count 4 = 20 # seems like a reasonable resolution still?
+        let multi_res_stack = pyramid::Pyramid::new(frame.i((0, 1, .., ..))?, 4)?;
 
         let new_frame_prefix = format!("{new_frame_index}");
 
@@ -77,6 +159,7 @@ impl Accumulator {
         let mut matches = vec![];
         for (i, _base_frame) in self.frames.iter().enumerate() {
             let other_pyramid = &self.pyramids[i];
+
             let this_frame_prefix = format!("{i}");
             let (value, pos) = multi_res_stack.pyramid_aligner(
                 &other_pyramid,
@@ -112,6 +195,11 @@ impl Accumulator {
                 println!(" to   : {:?}", frame_match.frame_index);
 
                 let parent_pos = grid.grid_position(grid_ids[frame_match.frame_index]);
+                println!(
+                    " parent_pos   : {:?}    (parent_pos + frame_match.pos): {:?}",
+                    parent_pos,
+                    (parent_pos + frame_match.pos)
+                );
 
                 grid_ids.push(grid.add_tensor(
                     &self.frames[i].ten()?,
@@ -152,48 +240,6 @@ impl Accumulator {
         Ok(())
     }
 
-    fn inflated_non_zero_present(frame: Ten<'_>, area_radius: usize) -> StableTorchResult<Tensor> {
-        let indices_at_pixel = frame.squeeze()?.argmax(Some(0), Some(true))?;
-        let zero_i64: Tensor = 0i64.try_into()?;
-        let zero_i64 = zero_i64.to(&indices_at_pixel.device().into())?;
-        let zero_f32: Tensor = 0.0f32.try_into()?;
-        let zero_f32 = zero_f32.to(&indices_at_pixel.device().into())?;
-        let non_bg = indices_at_pixel.ne(&zero_i64)?;
-
-        // Next, we convert that back to float sand convolute it with the inflation.
-        let non_bg_f32 = non_bg.to(&fp::DType::F32.into())?;
-
-        let convolution_circle = pyramid::circle_image(
-            area_radius * 2 + 1,
-            area_radius * 2 + 1,
-            area_radius as isize,
-            area_radius as isize,
-            area_radius as isize,
-        )?;
-        let convolution_circle = convolution_circle.to(&frame.device().into())?;
-        // convolution_circle
-        //     .image_scale_to_domain()?
-        //     .save_image("/tmp/convolution_kernel.png")?;
-
-        // Next, do the actual convolution.
-        let padding = (area_radius as _, area_radius as _);
-        let options = nn::functional::Conv2dOptions {
-            padding,
-            ..Default::default()
-        };
-        let non_bg_f32 = non_bg_f32.unsqueeze(0)?;
-        let conv_mask = convolution_circle.unsqueeze(0)?.unsqueeze(0)?;
-
-        let conv2 = nn::functional::conv2d(&non_bg_f32, &conv_mask, None, &options)?;
-        // conv2
-        //     .image_scale_to_domain()?
-        //     .save_image("/tmp/conv_result.png")?;
-
-        let boolean_mask = conv2.gt(&zero_f32)?;
-        let non_bg = boolean_mask.squeeze()?;
-        Ok(non_bg.to_owned()?)
-    }
-
     // This currently breaks down as we don't account for the 'revealed' area, and only sections that are in view
     // longer than they are obscured will work, results for those is super crisp though.
     // Count should use an inflated boolean mask around non-background.
@@ -230,10 +276,7 @@ impl Accumulator {
 
             // Then add the counts.
             let current_counts = counts.i((.., ay.clone(), ax.clone()))?;
-            // let with_addition =
-            //     current_values.add(&counts_one.i((.., ay.clone(), ax.clone()))?)?;
-            let presence_mask_with_ones =
-                Self::inflated_non_zero_present(frame.ten()?, area_radius)?;
+            let presence_mask_with_ones = inflated_non_zero_present(frame.ten()?, area_radius)?;
             if let Some(debug_dir) = debug_dir {
                 presence_mask_with_ones
                     .image_scale_to_domain()?
