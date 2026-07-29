@@ -427,13 +427,13 @@ mod test {
         let other = circle_image(h, w, cx, cy, r)?;
 
         let zero: Tensor = 0.0f32.try_into()?;
-        let one: Tensor = 1.0f32.try_into()?;
+        let one: Tensor = 3.0f32.try_into()?;
         let base = other.eq(&zero)?.mul(&one)?;
 
         // let black = Tensor::zeros(&[h, w], &Default::default())?;
         // let black = black;
         let zero: Tensor = 0.0f32.try_into()?;
-        let half: Tensor = 0.5f32.try_into()?;
+        let half: Tensor = 0.01f32.try_into()?;
         let black = other.mul(&half)?;
 
         // Next we need to stack that.
@@ -447,24 +447,19 @@ mod test {
     fn test_accumulator() -> StableTorchResult<()> {
         let frame_0 = make_circle_logits(30, 30)?;
         let frame_1 = make_circle_logits(30 + 50, 30 + 32)?;
-        frame_0.save_image("/tmp/frame_0.png")?;
-        frame_1.save_image("/tmp/frame_1.png")?;
-        println!("base; {:?}", frame_0.shape());
-        println!("other; {:?}", frame_1.shape());
+        // frame_0.save_image("/tmp/frame_0.png")?;
+        // frame_1.save_image("/tmp/frame_1.png")?;
+        // println!("base; {:?}", frame_0.shape());
+        // println!("other; {:?}", frame_1.shape());
 
         let mut accum = Accumulator::new();
 
         let layer_count = 4;
         accum.feed_logits_frame(&frame_0.ten()?, layer_count, None)?;
-        accum.feed_logits_frame(
-            &frame_1.ten()?,
-            layer_count,
-            Some(&std::path::PathBuf::from("/tmp/test_accumulator/")),
-        )?;
+        accum.feed_logits_frame(&frame_1.ten()?, layer_count, None)?;
 
-        println!("accum: {accum:?}");
         let best_fit = accum.frame_relations.get(1).unwrap().best_match().unwrap();
-        assert_eq!(best_fit.1, Position::new(20, 12));
+        assert_eq!(best_fit.1, Position::new(-50, -32));
 
         Ok(())
     }
