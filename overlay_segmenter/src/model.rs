@@ -138,6 +138,8 @@ impl UNet {
 }
 impl nn::Module for UNet {
     fn forward(&self, input: &Ten<'_>) -> Result<Tensor, anyhow::Error> {
+        // four maxpools, so pow(2, 4) divisibility on both h and w?
+
         let encoded_level_1 = self.encoder_conv_1.forward(input)?;
         let input_encode_level_2 = self.maxpool2x2.forward(&encoded_level_1.ten()?)?;
 

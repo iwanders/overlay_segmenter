@@ -136,7 +136,7 @@ impl Accumulator {
     pub fn feed_logits_frame(
         &mut self,
         frame: &Ten<'_>,
-
+        layer_count: usize,
         debug_dir: Option<&Path>,
     ) -> StableTorchResult<()> {
         let new_frame_index = self.frames.len();
@@ -147,7 +147,7 @@ impl Accumulator {
 
         // Layer count 3 = 30
         // layer count 4 = 20 # seems like a reasonable resolution still?
-        let multi_res_stack = pyramid::Pyramid::new(frame.i((0, 1, .., ..))?, 4)?;
+        let multi_res_stack = pyramid::Pyramid::new(frame.i((0, 1, .., ..))?, layer_count)?;
 
         let new_frame_prefix = format!("{new_frame_index}");
 
@@ -375,6 +375,7 @@ pub struct AccumulationConfig {
     pub fit_against_previous_frames: usize,
     pub min_observations: usize,
     pub radius: usize,
+    pub layer_count: usize,
 }
 
 struct AccumulationTensors {
@@ -402,7 +403,8 @@ impl LiveAccumulator {
 
         debug_dir: Option<&Path>,
     ) -> StableTorchResult<()> {
-        self.accumulator.feed_logits_frame(frame, debug_dir)?;
+        self.accumulator
+            .feed_logits_frame(frame, self.config.layer_count, debug_dir)?;
 
         let frame_count = self.accumulator.frame_count();
 

@@ -35,6 +35,10 @@ struct Args {
     /// Path to write the aligned data to.
     #[arg(long)]
     accumulate_write: Option<PathBuf>,
+
+    /// Downscale raw images by this factor.
+    #[arg(short, long)]
+    downscale: Option<usize>,
 }
 
 pub fn main() -> Result<(), anyhow::Error> {
@@ -68,24 +72,57 @@ pub fn main() -> Result<(), anyhow::Error> {
             .unwrap_or(path.parent().unwrap().to_owned());
         std::fs::create_dir_all(&output_path)?;
 
-        let img = Tensor::read_image(&path)?.image_floatify(&device.into())?;
+        let img = Tensor::read_image(&path)?;
+        let img = img.image_floatify(&device.into())?;
+        let img_orig_res = img.shape();
         let channels_stacked = img.to(&unet.dtype().into())?;
         let dimension = (.., 64..(896 + 64), 128..1792); // 1664x832
         let indexed = channels_stacked.i(dimension.clone())?;
+
+        println!("indexed before: {:?}", indexed.shape());
+        let (orig_crop_w, orig_crop_h) = (indexed.isize(-1), indexed.isize(-2));
+        let indexed = if let Some(downscale) = args.downscale {
+            let w = orig_crop_w / downscale;
+            let h = orig_crop_h / downscale;
+            indexed
+                .image_resize(
+                    [h, w],
+                    flash_powder::nn::functional::InterpolateAlgorithm::Nearest,
+                )?
+                .squeeze()?
+                .to_owned()?
+        } else {
+            indexed.to_owned()?
+        };
+        println!("indexed size: {:?}", indexed.shape());
         let image = indexed.unsqueeze(0)?;
 
         let start = std::time::Instant::now();
         let r = unet.forward(&image.ten()?)?;
 
         if let Some(accumulator) = accumulator.as_mut() {
-            accumulator.feed_logits_frame(&r.ten()?, Some(&output_path))?;
+            accumulator.feed_logits_frame(
+                &r.ten()?,
+                4 - args.downscale.unwrap_or(1).ilog2() as usize,
+                Some(&output_path),
+            )?;
         }
         println!("done accumulating");
 
         let mut mask_image = Tensor::zeros(
-            &[unet.channels_out(), img.size(1), img.size(2)],
+            &[unet.channels_out(), img_orig_res[1], img_orig_res[2]],
             &Default::default(),
         )?;
+        let r = if let Some(_downscale) = args.downscale {
+            r.image_resize(
+                [orig_crop_h, orig_crop_w],
+                flash_powder::nn::functional::InterpolateAlgorithm::Nearest,
+            )?
+            .squeeze()?
+            .to_owned()?
+        } else {
+            r
+        };
         mask_image
             .i_mut(dimension)?
             .copy_from_tensor(&r.squeeze()?)?;
