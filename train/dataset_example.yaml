@@ -175,7 +175,7 @@ data_config:
                     - <<: *text_color
                     - <<: *brightness_clamp
             ratio: 1.0
-        downscale_postproc:
+        downscale_postproc: # Optionally, a downscale postproc to downscale by a factor, commented out at the bottom, but could be used to reduce the tile size.
             function: downscale
             config:
                 factor: 2
@@ -193,6 +193,7 @@ data_config:
             position_y: { mean: 0.5, sigma: 0.15, by_self: true }
             # Crop a section of 256x256 out of the image.
             crop: [256, 256]
+            #crop: [512, 512] # if you downscale it, you may want to increase the input crop to ensure the tiles are the same size.
             post_process_image:
                 - augment_flip_horizontal
         fg_applicator:
@@ -313,6 +314,6 @@ data_config:
               - fine_blur
               - jpeg
               - fine_blur_jpg
-              - downscale_postproc
-          post_process_mask:
-              - downscale_postproc
+              #- downscale_postproc
+          #post_process_mask:
+          #    - downscale_postproc
