@@ -1,6 +1,6 @@
 use flash_powder::prelude::*;
 use serde::{Deserialize, Serialize};
-#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct Position {
     pub x: isize,
     pub y: isize,

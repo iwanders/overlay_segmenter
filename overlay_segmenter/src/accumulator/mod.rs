@@ -117,12 +117,30 @@ fn inflated_non_zero_present(frame: Ten<'_>, area_radius: usize) -> StableTorchR
     Ok(non_bg.to_owned()?)
 }
 
+#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
+pub struct AccumulationConfig {
+    pub fit_against_previous_frames: usize,
+    pub min_observations: usize,
+    pub radius: usize,
+    pub layer_count: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct Accumulation {
+    #[serde(with = "crate::serde_tensor::tensor")]
+    accumulation_values: Tensor,
+    #[serde(with = "crate::serde_tensor::tensor")]
+    accumulation_counts: Tensor,
+    config: AccumulationConfig,
+}
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Accumulator {
     #[serde(with = "crate::serde_tensor::vec_tensor")]
     frames: Vec<Tensor>,
     pyramids: Vec<Pyramid>,
     frame_relations: Vec<FrameRelation>,
+
+    accumulation: Option<Accumulation>,
 }
 impl Accumulator {
     pub fn new() -> Self {
@@ -130,7 +148,32 @@ impl Accumulator {
             frames: vec![],
             pyramids: vec![],
             frame_relations: vec![],
+            accumulation: None,
         }
+    }
+    pub fn enable_accumulator(&mut self, config: AccumulationConfig) -> StableTorchResult<()> {
+        self.accumulation = Some(Accumulation {
+            accumulation_values: Tensor::zeros(&[], &Default::default())?,
+            accumulation_counts: Tensor::zeros(&[], &Default::default())?,
+            config,
+        });
+        Ok(())
+    }
+
+    pub fn accumulate_logits_frame(&mut self, frame: &Ten<'_>) -> StableTorchResult<()> {
+        if self.accumulation.is_none() {
+            anyhow::bail!("trying to accumulate without config");
+        }
+
+        let config = self.accumulation.as_ref().map(|a| a.config).unwrap();
+
+        self.feed_logits_frame(frame, config.layer_count, None)?;
+
+        if self.frames.len() > config.fit_against_previous_frames {
+            // Promote the frame to the no-longer-fitted-against and waiting-n-frames-for-merge.
+        }
+
+        Ok(())
     }
 
     pub fn feed_logits_frame(
@@ -165,6 +208,7 @@ impl Accumulator {
                 &other_pyramid,
                 debug_dir.as_ref().map(|a| (*a, this_frame_prefix.as_str())),
             )?;
+            println!("Frame {i} with new: {value:?}, at {pos:?}");
             // Record the alignment of this new frame against the existing frame `i`.
             matches.push(FrameMatch {
                 frame_index: i,
@@ -351,6 +395,7 @@ impl Accumulator {
             frames,
             pyramids,
             frame_relations: self.frame_relations,
+            accumulation: self.accumulation,
         })
     }
     pub fn frame_count(&self) -> usize {
@@ -370,48 +415,56 @@ impl Accumulator {
     }
 }
 
-#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
-pub struct AccumulationConfig {
-    pub fit_against_previous_frames: usize,
-    pub min_observations: usize,
-    pub radius: usize,
-    pub layer_count: usize,
-}
+#[cfg(test)]
+mod test {
+    use super::*;
+    use pyramid::circle_image;
 
-struct AccumulationTensors {
-    frame: Tensor,
-    counts: Tensor,
-}
+    fn make_circle_logits(cx: isize, cy: isize) -> StableTorchResult<Tensor> {
+        let (h, w) = (128usize, 128usize);
+        let r = 16;
+        // `other`'s disk is shifted by (+20, +12) in (x, y) relative to `base`'s.
+        let other = circle_image(h, w, cx, cy, r)?;
 
-pub struct LiveAccumulator {
-    config: AccumulationConfig,
-    accumulator: Accumulator,
-    accumulation: Option<AccumulationTensors>,
-}
+        let zero: Tensor = 0.0f32.try_into()?;
+        let one: Tensor = 1.0f32.try_into()?;
+        let base = other.eq(&zero)?.mul(&one)?;
 
-impl LiveAccumulator {
-    pub fn new(config: AccumulationConfig) -> Self {
-        Self {
-            config,
-            accumulator: Accumulator::new(),
-            accumulation: None,
-        }
+        // let black = Tensor::zeros(&[h, w], &Default::default())?;
+        // let black = black;
+        let zero: Tensor = 0.0f32.try_into()?;
+        let half: Tensor = 0.5f32.try_into()?;
+        let black = other.mul(&half)?;
+
+        // Next we need to stack that.
+
+        fp::torch::stack(&[base.ten()?, other.ten()?, black.ten()?], 0)?
+            .unsqueeze(0)?
+            .to_owned()
     }
-    pub fn feed_logits_frame(
-        &mut self,
-        frame: &Ten<'_>,
 
-        debug_dir: Option<&Path>,
-    ) -> StableTorchResult<()> {
-        self.accumulator
-            .feed_logits_frame(frame, self.config.layer_count, debug_dir)?;
+    #[test]
+    fn test_accumulator() -> StableTorchResult<()> {
+        let frame_0 = make_circle_logits(30, 30)?;
+        let frame_1 = make_circle_logits(30 + 50, 30 + 32)?;
+        frame_0.save_image("/tmp/frame_0.png")?;
+        frame_1.save_image("/tmp/frame_1.png")?;
+        println!("base; {:?}", frame_0.shape());
+        println!("other; {:?}", frame_1.shape());
 
-        let frame_count = self.accumulator.frame_count();
+        let mut accum = Accumulator::new();
 
-        if frame_count > self.config.fit_against_previous_frames {
-            // Remove the first frame, and merge it with our current accumulation.
-            // But to merge, we need the
-        }
+        let layer_count = 4;
+        accum.feed_logits_frame(&frame_0.ten()?, layer_count, None)?;
+        accum.feed_logits_frame(
+            &frame_1.ten()?,
+            layer_count,
+            Some(&std::path::PathBuf::from("/tmp/test_accumulator/")),
+        )?;
+
+        println!("accum: {accum:?}");
+        let best_fit = accum.frame_relations.get(1).unwrap().best_match().unwrap();
+        assert_eq!(best_fit.1, Position::new(20, 12));
 
         Ok(())
     }

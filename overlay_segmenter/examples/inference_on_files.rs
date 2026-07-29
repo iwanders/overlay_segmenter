@@ -96,6 +96,7 @@ pub fn main() -> Result<(), anyhow::Error> {
         };
         println!("indexed size: {:?}", indexed.shape());
         let image = indexed.unsqueeze(0)?;
+        println!("image size: {:?}", image.shape());
 
         let start = std::time::Instant::now();
         let r = unet.forward(&image.ten()?)?;

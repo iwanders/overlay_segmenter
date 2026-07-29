@@ -22,6 +22,7 @@ impl Pyramid {
     pub fn new(input_data: Ten<'_>, layer_count: usize) -> StableTorchResult<Pyramid> {
         let mut scale = 1;
         let mut data = input_data.unsqueeze(0)?.unsqueeze(0)?.to_owned()?;
+
         let mut layers = vec![Layer {
             scale: 1,
             data: data.clone(),
@@ -41,6 +42,7 @@ impl Pyramid {
         Ok(Self { layers })
     }
 
+    /// Retrieve the tensor at the specified layer, 0 is full res, 1 is half res, etc.
     pub fn get_tensor(&self, index: usize) -> Option<Ten<'_>> {
         self.layers.get(index).map(|l| l.data.ten().ok()).flatten()
     }
@@ -79,6 +81,9 @@ impl Pyramid {
         {
             let base_img = b.data.ten()?;
             let other_img = o.data.ten()?;
+
+            base_img.save_image(&format!("/tmp/base_for_{layer}.png"))?;
+            other_img.save_image(&format!("/tmp/other_for_{layer}.png"))?;
 
             let (base_img, other_img, padding) = if layer == 0 {
                 // At the first layer we do a full search, with half the dimensions of padding, this ensures that we try
@@ -263,6 +268,59 @@ mod test {
 
         let (value, pos) = base_p.pyramid_aligner(&other_p, None)?;
         println!("shift=({shift_x},{shift_y}) recovered=({pos:?}) value={value}");
+
+        // `pyramid_aligner` returns the position of `other` relative to `self`, so the
+        // recovered offset should equal the shift we applied (within a pixel).
+        assert!(
+            (pos.x - shift_x).abs() <= 1,
+            "dx={}, expected {shift_x}",
+            pos.x
+        );
+        assert!(
+            (pos.y - shift_y).abs() <= 1,
+            "dy={}, expected {shift_y}",
+            pos.y
+        );
+        assert!(value > 0.0);
+        Ok(())
+    }
+
+    fn make_circle_logits(cx: isize, cy: isize) -> StableTorchResult<Tensor> {
+        let (h, w) = (128usize, 128usize);
+        let r = 16;
+        // `other`'s disk is shifted by (+20, +12) in (x, y) relative to `base`'s.
+        let other = circle_image(h, w, cx, cy, r)?;
+
+        let zero: Tensor = 0.0f32.try_into()?;
+        let one: Tensor = 1.0f32.try_into()?;
+        let base = other.eq(&zero)?.mul(&one)?;
+
+        // let black = Tensor::zeros(&[h, w], &Default::default())?;
+        // let black = black;
+        let zero: Tensor = 0.0f32.try_into()?;
+        let half: Tensor = 0.5f32.try_into()?;
+        let black = other.mul(&half)?;
+
+        // Next we need to stack that.
+
+        fp::torch::stack(&[base.ten()?, other.ten()?, black.ten()?], 0)?
+            .unsqueeze(0)?
+            .to_owned()
+    }
+
+    #[test]
+    fn test_pyramid_circles() -> StableTorchResult<()> {
+        let frame_0 = make_circle_logits(30, 30)?;
+        let shift_x = 50;
+        let shift_y = 32;
+        let frame_1 = make_circle_logits(30 + shift_x, 30 + shift_y)?;
+        frame_0.save_image("/tmp/frame_0.png")?;
+        frame_1.save_image("/tmp/frame_1.png")?;
+
+        let base_p = Pyramid::new(frame_0.i((0, 1, .., ..))?, 4)?;
+        let other_p = Pyramid::new(frame_1.i((0, 1, .., ..))?, 4)?;
+
+        let (value, pos) = base_p.pyramid_aligner(&other_p, None)?;
 
         // `pyramid_aligner` returns the position of `other` relative to `self`, so the
         // recovered offset should equal the shift we applied (within a pixel).
