@@ -136,6 +136,7 @@ struct Accumulation {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct LocalizedFrame {
+    id: StableFrameId,
     #[serde(with = "crate::serde_tensor::tensor")]
     frame: Tensor,
     pyramid: Pyramid,
@@ -144,6 +145,7 @@ struct LocalizedFrame {
 impl LocalizedFrame {
     pub fn into_device(self, device: &fp::Device) -> StableTorchResult<Self> {
         Ok(Self {
+            id: self.id,
             frame: self.frame.to(&flash_powder::factory::ToOptions {
                 device: Some(*device),
                 ..Default::default()
@@ -154,17 +156,23 @@ impl LocalizedFrame {
     }
 }
 
+use std::collections::BTreeMap;
+
+#[derive(Debug, Copy, Clone, Deserialize, Serialize, Ord, PartialOrd, Eq, PartialEq)]
+pub struct StableFrameId(pub usize);
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Accumulator {
-    localized_frames: Vec<LocalizedFrame>,
-
+    localized_frames: BTreeMap<StableFrameId, LocalizedFrame>,
+    id_counter: usize,
     accumulation: Option<Accumulation>,
 }
 impl Accumulator {
     pub fn new() -> Self {
         Self {
-            localized_frames: vec![],
+            localized_frames: Default::default(),
             accumulation: None,
+            id_counter: 0,
         }
     }
     pub fn enable_accumulator(&mut self, config: AccumulationConfig) -> StableTorchResult<()> {
@@ -191,7 +199,7 @@ impl Accumulator {
             let mut current_pos = Position::origin();
             for localized_frame in self
                 .localized_frames
-                .iter()
+                .values()
                 .take(config.fit_against_previous_frames)
             {
                 let offset = localized_frame
@@ -207,7 +215,7 @@ impl Accumulator {
             // Now we need to merge values into the accrued values.
             // Skip that for now.
             // Pop the frame from the front.
-            self.localized_frames.remove(0);
+            self.localized_frames.pop_first();
             // Update the frame relations, also make sure that we incorporate the position...
             // Ugh, these indices don't match anymore.
             //
@@ -223,7 +231,8 @@ impl Accumulator {
         layer_count: usize,
         debug_dir: Option<&Path>,
     ) -> StableTorchResult<()> {
-        let new_frame_index = self.localized_frames.len();
+        let new_frame_index = self.id_counter;
+        self.id_counter += 1;
         let frame = frame.to(&fp::DType::F32.into())?;
 
         // Should we do a softmax here? or do we just run with the raw logits?
@@ -242,7 +251,7 @@ impl Accumulator {
         // Hmm, we should probably just compare against a running composite...
         let mut matches = vec![];
         for (i, _base_frame) in self.localized_frames.iter().enumerate() {
-            let other_pyramid = &self.localized_frames[i].pyramid;
+            let other_pyramid = &_base_frame.1.pyramid;
 
             let this_frame_prefix = format!("{i}");
             let (value, pos) = multi_res_stack.pyramid_aligner(
@@ -257,12 +266,16 @@ impl Accumulator {
                 pos,
             });
         }
-
-        self.localized_frames.push(LocalizedFrame {
-            frame,
-            pyramid: multi_res_stack,
-            frame_relation: FrameRelation { matches },
-        });
+        let id = StableFrameId(new_frame_index);
+        self.localized_frames.insert(
+            id,
+            LocalizedFrame {
+                id,
+                frame,
+                pyramid: multi_res_stack,
+                frame_relation: FrameRelation { matches },
+            },
+        );
 
         Ok(())
     }
@@ -271,8 +284,8 @@ impl Accumulator {
         // Iterate over all the frames, collect the best scoring one, then create the composite.
         let mut grid = GridOverlay::new();
         let mut grid_ids = vec![];
-        for (i, base) in self.localized_frames.iter().enumerate() {
-            println!("frame {i}");
+        for (i, base) in self.localized_frames.iter() {
+            println!("frame {i:?}");
 
             let best_entry: Option<(f32, Position, FrameMatch)> = base.frame_relation.best_match();
 
@@ -305,14 +318,25 @@ impl Accumulator {
         let (w, h) = grid.full_size();
 
         let options = flash_powder::factory::TensorOptions {
-            dtype: Some(self.localized_frames[0].frame.dtype()),
-            device: Some(self.localized_frames[0].frame.device()),
+            dtype: Some(
+                self.localized_frames
+                    .first_key_value()
+                    .map(|(_, a)| a.frame.dtype())
+                    .unwrap(),
+            ),
+            device: Some(
+                self.localized_frames
+                    .first_key_value()
+                    .map(|(_, a)| a.frame.device())
+                    .unwrap(),
+            ),
             ..Default::default()
         };
         let mut canvas: Tensor = Tensor::zeros(&[3, h, w], &options)?;
 
         let mut channel = 0;
-        for (grid_id, localized_frame) in grid.ids().zip(self.localized_frames.iter()) {
+        for (grid_id, (stable_id, localized_frame)) in grid.ids().zip(self.localized_frames.iter())
+        {
             let (ax, ay) = grid.full_grid_irange(grid_id);
             canvas
                 .i_mut((channel, ay, ax))?
@@ -394,7 +418,7 @@ impl Accumulator {
     ) -> StableTorchResult<Tensor> {
         let mut frames = vec![];
         let mut current_pos = Position::origin();
-        for localized_frame in self.localized_frames.iter() {
+        for localized_frame in self.localized_frames.values() {
             let offset = localized_frame
                 .frame_relation
                 .best_match()
@@ -444,12 +468,13 @@ impl Accumulator {
     }
 
     pub fn into_device(mut self, device: fp::Device) -> StableTorchResult<Self> {
-        let mut localized_frames = vec![];
-        for p in self.localized_frames.drain(..) {
-            localized_frames.push(p.into_device(&device)?);
+        let mut localized_frames = BTreeMap::new();
+        for (id, p) in self.localized_frames.into_iter() {
+            localized_frames.insert(id, p.into_device(&device)?);
         }
 
         Ok(Self {
+            id_counter: self.id_counter,
             localized_frames,
             accumulation: self.accumulation,
         })
@@ -460,8 +485,9 @@ impl Accumulator {
 
     pub fn pop_left(&mut self) -> Option<(Tensor, FrameRelation, Pyramid)> {
         if self.frame_count() > 1 {
-            let r = self.localized_frames.remove(0);
+            let (_, r) = self.localized_frames.pop_first()?;
             let LocalizedFrame {
+                id,
                 frame,
                 pyramid,
                 frame_relation,
@@ -516,7 +542,14 @@ mod test {
         accum.feed_logits_frame(&frame_0.ten()?, layer_count, None)?;
         accum.feed_logits_frame(&frame_1.ten()?, layer_count, None)?;
 
-        let best_fit = accum.frame_relations.get(1).unwrap().best_match().unwrap();
+        let best_fit = accum
+            .localized_frames
+            .last_key_value()
+            .unwrap()
+            .1
+            .frame_relation
+            .best_match()
+            .unwrap();
         assert_eq!(best_fit.1, Position::new(-50, -32));
 
         Ok(())
