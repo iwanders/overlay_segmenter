@@ -121,7 +121,7 @@ fn inflated_non_zero_present(frame: Ten<'_>, area_radius: usize) -> StableTorchR
 pub struct AccumulationConfig {
     pub fit_against_previous_frames: usize,
     pub min_observations: usize,
-    pub radius: usize,
+    pub area_radius: usize,
     pub layer_count: usize,
 }
 
@@ -171,6 +171,33 @@ impl Accumulator {
 
         if self.frames.len() > config.fit_against_previous_frames {
             // Stack 'n' frames together, filter them, and merge them into the main accumulation.
+            let mut frames = vec![];
+            let mut current_pos = Position::origin();
+            for (relation, frame) in self
+                .frame_relations
+                .iter()
+                .take(config.fit_against_previous_frames)
+                .zip(self.frames.iter().take(config.fit_against_previous_frames))
+            {
+                let offset = relation
+                    .best_match()
+                    .map(|(_, p, _)| p)
+                    .unwrap_or(Position::origin());
+                current_pos = current_pos + offset;
+                frames.push((current_pos, frame.lazy_clone()?));
+            }
+
+            let (values, counts) = Self::combine_frames(&frames, config.area_radius)?;
+            // Now we need to merge values into the accrued values.
+            // Skip that for now.
+            // Pop the frame from the front.
+            self.frames.remove(0);
+            self.frame_relations.remove(0);
+            self.pyramids.remove(0);
+            // Update the frame relations, also make sure that we incorporate the position...
+            // Ugh, these indices don't match anymore.
+            //
+            todo!("make frame indices stable")
         }
 
         Ok(())
@@ -285,7 +312,7 @@ impl Accumulator {
     }
 
     pub fn combine_frames(
-        frames: Vec<(Position, Tensor)>,
+        frames: &[(Position, Tensor)],
         area_radius: usize,
     ) -> StableTorchResult<(Tensor, Tensor)> {
         let mut grid = GridOverlay::new();
@@ -361,7 +388,7 @@ impl Accumulator {
             frames.push((current_pos, frame.lazy_clone()?));
         }
 
-        let (values, counts) = Self::combine_frames(frames, area_radius)?;
+        let (values, counts) = Self::combine_frames(&frames, area_radius)?;
 
         // Now that we are here, we can divide the actual values by the counts... and we should get a pristine image.
         // Acounts contains zeros, which is a problem as it blows up the values to nan, so on the locations where the
