@@ -170,7 +170,7 @@ impl Accumulator {
         self.feed_logits_frame(frame, config.layer_count, None)?;
 
         if self.frames.len() > config.fit_against_previous_frames {
-            // Promote the frame to the no-longer-fitted-against and waiting-n-frames-for-merge.
+            // Stack 'n' frames together, filter them, and merge them into the main accumulation.
         }
 
         Ok(())
@@ -284,6 +284,63 @@ impl Accumulator {
         Ok(())
     }
 
+    pub fn combine_frames(
+        frames: Vec<(Position, Tensor)>,
+        area_radius: usize,
+    ) -> StableTorchResult<(Tensor, Tensor)> {
+        let mut grid = GridOverlay::new();
+        for (position, t) in frames.iter() {
+            grid.add_tensor(t, (position.x, position.y));
+        }
+        if frames.is_empty() {
+            anyhow::bail!("no frames provided")
+        }
+        let first_frame = &frames.first().unwrap().1;
+        let channels = first_frame.isize(-3);
+        // let batch = self.frames.first().map(|a| a.isize(-4)).unwrap_or(0);
+        let fdtype = first_frame.dtype();
+
+        let options = flash_powder::factory::TensorOptions {
+            dtype: Some(fdtype),
+            device: Some(first_frame.device()),
+            ..Default::default()
+        };
+        let (w, h) = grid.full_size();
+        let mut values: Tensor = Tensor::zeros(&[channels, h, w], &options)?;
+        let mut counts: Tensor = Tensor::zeros(
+            &[1, h, w],
+            &flash_powder::factory::TensorOptions {
+                dtype: Some(fp::DType::I64),
+                device: Some(first_frame.device()),
+                ..Default::default()
+            },
+        )?;
+
+        for (grid_id, (_pos, frame)) in grid.ids().zip(frames.iter()) {
+            let (ax, ay) = grid.full_grid_irange(grid_id);
+
+            // Then add the counts.
+            let current_counts = counts.i((.., ay.clone(), ax.clone()))?;
+            let presence_mask_with_ones = inflated_non_zero_present(frame.ten()?, area_radius)?;
+
+            let with_addition = current_counts.add(&presence_mask_with_ones)?;
+            counts
+                .i_mut((.., ay.clone(), ax.clone()))?
+                .copy_from_tensor(&with_addition)?;
+
+            // Next, we can add the values, but we also multiply those by the mask we just created.
+            // Such that we only consider points in the vicinity.
+            let current_values = values.i((.., ay.clone(), ax.clone()))?;
+            let with_addition =
+                current_values.add(&frame.squeeze()?.mul(&presence_mask_with_ones)?)?;
+            values
+                .i_mut((.., ay.clone(), ax.clone()))?
+                .copy_from_tensor(&with_addition)?;
+        }
+
+        Ok((values, counts))
+    }
+
     // This currently breaks down as we don't account for the 'revealed' area, and only sections that are in view
     // longer than they are obscured will work, results for those is super crisp though.
     // Count should use an inflated boolean mask around non-background.
@@ -293,56 +350,18 @@ impl Accumulator {
         min_observations: usize,
         debug_dir: Option<&Path>,
     ) -> StableTorchResult<Tensor> {
-        let grid = self.create_grid()?;
-        // Stack the grid, round robin channel.
-        let (w, h) = grid.full_size();
-        let channels = self.frames.first().map(|a| a.isize(-3)).unwrap_or(0);
-        // let batch = self.frames.first().map(|a| a.isize(-4)).unwrap_or(0);
-        let fdtype = self.frames[0].dtype();
-
-        let options = flash_powder::factory::TensorOptions {
-            dtype: Some(fdtype),
-            device: Some(self.frames[0].device()),
-            ..Default::default()
-        };
-        let mut canvas: Tensor = Tensor::zeros(&[channels, h, w], &options)?;
-        let mut counts: Tensor = Tensor::zeros(
-            &[1, h, w],
-            &flash_powder::factory::TensorOptions {
-                dtype: Some(fp::DType::I64),
-                device: Some(self.frames[0].device()),
-                ..Default::default()
-            },
-        )?;
-
-        for (grid_id, frame) in grid.ids().zip(self.frames.iter()) {
-            let (ax, ay) = grid.full_grid_irange(grid_id);
-
-            // Then add the counts.
-            let current_counts = counts.i((.., ay.clone(), ax.clone()))?;
-            let presence_mask_with_ones = inflated_non_zero_present(frame.ten()?, area_radius)?;
-            if let Some(debug_dir) = debug_dir {
-                presence_mask_with_ones
-                    .image_scale_to_domain()?
-                    .save_image(
-                        debug_dir.join(format!("presence_mask_with_ones_{:?}.png", grid_id)),
-                    )?;
-            }
-
-            let with_addition = current_counts.add(&presence_mask_with_ones)?;
-            counts
-                .i_mut((.., ay.clone(), ax.clone()))?
-                .copy_from_tensor(&with_addition)?;
-
-            // Next, we can add the values, but we also multiply those by the mask we just created.
-            // Such that we only consider points in the vicinity.
-            let current_values = canvas.i((.., ay.clone(), ax.clone()))?;
-            let with_addition =
-                current_values.add(&frame.squeeze()?.mul(&presence_mask_with_ones)?)?;
-            canvas
-                .i_mut((.., ay.clone(), ax.clone()))?
-                .copy_from_tensor(&with_addition)?;
+        let mut frames = vec![];
+        let mut current_pos = Position::origin();
+        for (relation, frame) in self.frame_relations.iter().zip(self.frames.iter()) {
+            let offset = relation
+                .best_match()
+                .map(|(_, p, _)| p)
+                .unwrap_or(Position::origin());
+            current_pos = current_pos + offset;
+            frames.push((current_pos, frame.lazy_clone()?));
         }
+
+        let (values, counts) = Self::combine_frames(frames, area_radius)?;
 
         // Now that we are here, we can divide the actual values by the counts... and we should get a pristine image.
         // Acounts contains zeros, which is a problem as it blows up the values to nan, so on the locations where the
@@ -357,7 +376,7 @@ impl Accumulator {
                 .save_image(debug_dir.join(format!("zeros_made_into_ones_but_counts_else.png")))?;
         }
 
-        let r = canvas.div(&zeros_made_into_ones_but_counts_else.to(&fdtype.into())?)?;
+        let r = values.div(&zeros_made_into_ones_but_counts_else.to(&values.dtype().into())?)?;
 
         // We can do this to further clean it up, accepting only data where 'n' observations were present.
         if min_observations >= 2 {
