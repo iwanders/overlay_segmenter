@@ -50,7 +50,7 @@ as time goes on and map size grows? But at the cost of drift... maybe we should 
 
 #[derive(Debug, Copy, Clone, Deserialize, Serialize)]
 struct FrameMatch {
-    pub frame_index: usize,
+    pub frame_index: StableFrameId,
     pub value: f32,
     pub pos: Position,
 }
@@ -193,7 +193,7 @@ impl Accumulator {
 
         self.feed_logits_frame(frame, config.layer_count, None)?;
 
-        if self.localized_frames.len() > config.fit_against_previous_frames {
+        if self.localized_frames.len() >= config.fit_against_previous_frames {
             // Stack 'n' frames together, filter them, and merge them into the main accumulation.
             let mut frames = vec![];
             let mut current_pos = Position::origin();
@@ -215,10 +215,19 @@ impl Accumulator {
             // Now we need to merge values into the accrued values.
             // Skip that for now.
             // Pop the frame from the front.
-            self.localized_frames.pop_first();
+            let (ancestor_id, ancestor) = self.localized_frames.pop_first().unwrap();
             // Update the frame relations, also make sure that we incorporate the position...
             // Ugh, these indices don't match anymore.
-            //
+
+            for (id, entry) in self.localized_frames.iter_mut() {
+                for rel in entry.frame_relation.matches.iter_mut() {
+                    if rel.frame_index == *id {
+                        // offset the ancestor position with the current accumulated result.
+                        todo!()
+                    }
+                }
+            }
+
             todo!("make frame indices stable")
         }
 
@@ -250,18 +259,18 @@ impl Accumulator {
         // Compare it against all the existing frames, because why not.
         // Hmm, we should probably just compare against a running composite...
         let mut matches = vec![];
-        for (i, _base_frame) in self.localized_frames.iter().enumerate() {
-            let other_pyramid = &_base_frame.1.pyramid;
+        for (frame_id, base_frame) in self.localized_frames.iter() {
+            let other_pyramid = &base_frame.pyramid;
 
-            let this_frame_prefix = format!("{i}");
+            let this_frame_prefix = format!("{}", frame_id.0);
             let (value, pos) = multi_res_stack.pyramid_aligner(
                 &other_pyramid,
                 debug_dir.as_ref().map(|a| (*a, this_frame_prefix.as_str())),
             )?;
-            println!("Frame {i} with new: {value:?}, at {pos:?}");
+            println!("Frame {this_frame_prefix} with new: {value:?}, at {pos:?}");
             // Record the alignment of this new frame against the existing frame `i`.
             matches.push(FrameMatch {
-                frame_index: i,
+                frame_index: base_frame.id,
                 value,
                 pos,
             });
@@ -283,7 +292,7 @@ impl Accumulator {
     fn create_grid(&self) -> StableTorchResult<GridOverlay> {
         // Iterate over all the frames, collect the best scoring one, then create the composite.
         let mut grid = GridOverlay::new();
-        let mut grid_ids = vec![];
+        let mut grid_ids = BTreeMap::new();
         for (i, base) in self.localized_frames.iter() {
             println!("frame {i:?}");
 
@@ -294,18 +303,19 @@ impl Accumulator {
                 println!(" pos  : {p:?}");
                 println!(" to   : {:?}", frame_match.frame_index);
 
-                let parent_pos = grid.grid_position(grid_ids[frame_match.frame_index]);
+                let parent_pos = grid.grid_position(grid_ids[&frame_match.frame_index]);
                 println!(
                     " parent_pos   : {:?}    (parent_pos + frame_match.pos): {:?}",
                     parent_pos,
                     (parent_pos + frame_match.pos)
                 );
 
-                grid_ids.push(
+                grid_ids.insert(
+                    *i,
                     grid.add_tensor(&base.frame.ten()?, (parent_pos + frame_match.pos).into()),
                 );
             } else {
-                grid_ids.push(grid.add_tensor(&base.frame.ten()?, (0, 0)));
+                grid_ids.insert(*i, grid.add_tensor(&base.frame.ten()?, (0, 0)));
             }
         }
 
