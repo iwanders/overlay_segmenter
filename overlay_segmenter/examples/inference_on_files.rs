@@ -31,6 +31,9 @@ struct Args {
     /// Run the accumulator
     #[arg(short, long)]
     accumulate: bool,
+    /// Use the combined accumulation
+    #[arg(short, long)]
+    enable: bool,
 
     /// Path to write the aligned data to.
     #[arg(long)]
@@ -47,7 +50,19 @@ pub fn main() -> Result<(), anyhow::Error> {
     let (unet, device, palette) = common_setup(&args.model)?;
 
     let mut accumulator = if args.accumulate {
-        Some(overlay_segmenter::accumulator::Accumulator::new())
+        let mut accum = overlay_segmenter::accumulator::Accumulator::new();
+        Some(if args.enable {
+            let config = overlay_segmenter::accumulator::AccumulationConfig {
+                fit_against_previous_frames: 3,
+                min_observations: 1,
+                area_radius: 15,
+                layer_count: 3,
+            };
+            accum.enable_accumulator(config)?;
+            accum
+        } else {
+            accum
+        })
     } else {
         None
     };
@@ -102,11 +117,15 @@ pub fn main() -> Result<(), anyhow::Error> {
         let r = unet.forward(&image.ten()?)?;
 
         if let Some(accumulator) = accumulator.as_mut() {
-            accumulator.feed_logits_frame(
-                &r.ten()?,
-                4 - args.downscale.unwrap_or(1).ilog2() as usize,
-                Some(&output_path),
-            )?;
+            if args.enable {
+                accumulator.accumulate_logits_frame(&r.ten()?)?;
+            } else {
+                accumulator.feed_logits_frame(
+                    &r.ten()?,
+                    4 - args.downscale.unwrap_or(1).ilog2() as usize,
+                    Some(&output_path),
+                )?;
+            }
         }
         println!("done accumulating");
 
@@ -159,7 +178,12 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     if let Some(accumulator) = accumulator.as_mut() {
         if let Some(path) = args.output.as_ref() {
-            accumulator.debug_use_accumulation(&path)?;
+            if args.enable {
+                todo!();
+                // accumulator.accumulate_dump(&path)?;
+            } else {
+                accumulator.debug_use_accumulation(&path)?;
+            }
         }
         if let Some(write_path) = args.accumulate_write.as_ref() {
             accumulator.write_postcard(&write_path)?;

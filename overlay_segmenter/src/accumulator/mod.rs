@@ -212,6 +212,7 @@ impl Accumulator {
             }
 
             let (values, counts) = Self::combine_frames(&frames, config.area_radius)?;
+            println!("got values and counts at: {:?}", frames[0].0);
             // Now we need to merge values into the accrued values.
             // Skip that for now.
             // Pop the frame from the front.
@@ -219,16 +220,19 @@ impl Accumulator {
             // Update the frame relations, also make sure that we incorporate the position...
             // Ugh, these indices don't match anymore.
 
-            for (id, entry) in self.localized_frames.iter_mut() {
+            for (_id, entry) in self.localized_frames.iter_mut() {
                 for rel in entry.frame_relation.matches.iter_mut() {
-                    if rel.frame_index == *id {
+                    if rel.frame_index == ancestor_id {
                         // offset the ancestor position with the current accumulated result.
-                        todo!()
+                        rel.pos = rel.pos
+                            + ancestor
+                                .frame_relation
+                                .best_match()
+                                .map(|(_, p, _)| p)
+                                .unwrap_or(Position::origin())
                     }
                 }
             }
-
-            todo!("make frame indices stable")
         }
 
         Ok(())
