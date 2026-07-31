@@ -257,6 +257,10 @@ impl GridOverlay {
             combined_grid.full_size().into(),
         ))
     }
+
+    pub fn position_in_grid(&self, pos: Position) -> Position {
+        pos - self.extent().0
+    }
 }
 
 #[cfg(test)]

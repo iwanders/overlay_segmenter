@@ -133,6 +133,7 @@ struct Accumulation {
     accumulation_counts: Tensor,
 
     accumulation_position: Position,
+    origin_in_accumulation: Position,
 
     config: AccumulationConfig,
 }
@@ -183,6 +184,7 @@ impl Accumulator {
             accumulation_values: Tensor::zeros(&[], &Default::default())?,
             accumulation_counts: Tensor::zeros(&[], &Default::default())?,
             accumulation_position: Position::origin(),
+            origin_in_accumulation: Position::origin(),
             config,
         });
         Ok(())
@@ -268,6 +270,13 @@ impl Accumulator {
                         .copy_from_tensor(&accumulation_mut.accumulation_counts)?;
                     accumulation_mut.accumulation_counts = new_counts;
                     accumulation_mut.accumulation_values = new_values;
+
+                    // We need to correct the position when this happens.
+                    let grid_pos = grid.full_position();
+                    accumulation_mut.accumulation_position = grid_pos.into();
+
+                    accumulation_mut.origin_in_accumulation =
+                        grid.position_in_grid(accumulation_mut.accumulation_position);
                 }
 
                 // Now the grid is always the correct size, and we can do the addition thing.
