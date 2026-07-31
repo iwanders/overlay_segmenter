@@ -33,6 +33,12 @@ impl From<Position> for (isize, isize) {
     }
 }
 
+impl From<(isize, isize)> for Position {
+    fn from(s: (isize, isize)) -> Self {
+        Position { x: s.0, y: s.1 }
+    }
+}
+
 impl std::ops::Add for Position {
     type Output = Self;
 
@@ -54,11 +60,18 @@ impl std::ops::Sub for Position {
     }
 }
 
-#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct Rect {
     pub w: usize,
     pub h: usize,
 }
+
+impl From<(usize, usize)> for Rect {
+    fn from(s: (usize, usize)) -> Self {
+        Rect { w: s.0, h: s.1 }
+    }
+}
+
 impl std::ops::Add<Rect> for Position {
     type Output = Position;
 
@@ -102,26 +115,26 @@ impl GridOverlay {
     }
 
     /// Add a grid.
-    pub fn add_grid_raw(&mut self, size: (usize, usize), position: (isize, isize)) -> GridId {
+    pub fn add_grid_raw(&mut self, size: (usize, usize), position: Position) -> GridId {
         let id = GridId(self.windows.len());
         self.windows.push(GridWindow {
             size: Rect {
                 w: size.0,
                 h: size.1,
             },
-            position: Position::new(position.0, position.1),
+            position: Position::new(position.x, position.y),
         });
         id
     }
     /// Add a tensor grid
-    pub fn add_tensor<T: TensorProperties>(&mut self, t: &T, position: (isize, isize)) -> GridId {
+    pub fn add_tensor<T: TensorProperties>(&mut self, t: &T, position: Position) -> GridId {
         let id = GridId(self.windows.len());
         self.windows.push(GridWindow {
             size: Rect {
                 w: t.isize(-1) as _,
                 h: t.isize(-2) as _,
             },
-            position: Position::new(position.0, position.1),
+            position: Position::new(position.x, position.y),
         });
         id
     }
@@ -158,6 +171,11 @@ impl GridOverlay {
         let (min, max) = self.extent();
         let diff = max - min;
         (diff.x as usize, diff.y as usize)
+    }
+
+    pub fn full_position(&self) -> (isize, isize) {
+        let (min, max) = self.extent();
+        min.into()
     }
 
     /// Returns the position of this grid in the full size coordinates.
@@ -214,6 +232,31 @@ impl GridOverlay {
         }
         unreachable!("grid id {grid:?} was passed, which doesn't originate from this GridOverlay");
     }
+
+    /// Calculates the necessary growth for the other pos & size to fit on a new canvas together with current data.
+    ///
+    /// Returns new grid position and size if growth is necessary, empty if the current grid is large enough to hold the
+    /// new data.
+    pub fn determine_growth(
+        &self,
+        other_pos: Position,
+        other_size: Rect,
+    ) -> Option<(Position, Rect)> {
+        let mut combined_grid = GridOverlay::new();
+        combined_grid.add_grid_raw((other_size.w, other_size.h), other_pos);
+        combined_grid.add_grid_raw(self.full_size(), combined_grid.full_position().into());
+
+        // If extents are equal, we don't need to do anything because it already fits, no growth happened.
+        if combined_grid.extent() == self.extent() {
+            return None;
+        }
+
+        // The extent was not the same, so just return the combined grid and position.
+        Some((
+            combined_grid.full_position().into(),
+            combined_grid.full_size().into(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -226,8 +269,8 @@ mod test {
         let overlay = (1, 3);
         let position = (8, 7);
         let mut o = GridOverlay::new();
-        let b_id = o.add_grid_raw(base, (0, 0));
-        let o_id = o.add_grid_raw(overlay, position);
+        let b_id = o.add_grid_raw(base, Position::origin());
+        let o_id = o.add_grid_raw(overlay, position.into());
 
         let (lowest, highest) = o.extent();
         assert_eq!(lowest.x, 0); // start of base.
@@ -251,8 +294,8 @@ mod test {
         let overlay = (1, 3);
         let position = (-8, -7);
         let mut o = GridOverlay::new();
-        let b_id = o.add_grid_raw(base, (0, 0));
-        let o_id = o.add_grid_raw(overlay, position);
+        let b_id = o.add_grid_raw(base, (0, 0).into());
+        let o_id = o.add_grid_raw(overlay, position.into());
 
         let (lowest, highest) = o.extent();
         assert_eq!(lowest.x, -8); // Start of overlay
@@ -277,8 +320,8 @@ mod test {
         let overlay = (1, 3);
         let position = (-8, -7);
         let mut o = GridOverlay::new();
-        let b_id = o.add_grid_raw(base, base_pos);
-        let o_id = o.add_grid_raw(overlay, position);
+        let b_id = o.add_grid_raw(base, base_pos.into());
+        let o_id = o.add_grid_raw(overlay, position.into());
 
         let (lowest, highest) = o.extent();
         assert_eq!(lowest.x, -8); // Start of overlay
@@ -308,8 +351,8 @@ mod test {
         // 0 1 2 ; 0 1 2 3
         // 1 2 3 ; 2 3 4 5
         let mut o = GridOverlay::new();
-        let b_id = o.add_grid_raw(base, base_pos);
-        let o_id = o.add_grid_raw(overlay, position);
+        let b_id = o.add_grid_raw(base, base_pos.into());
+        let o_id = o.add_grid_raw(overlay, position.into());
         let (min, max) = o.overlap();
         assert_eq!(min.x, 1);
         assert_eq!(min.y, 2);
@@ -324,5 +367,18 @@ mod test {
         let (o_overlap_x, o_overlap_y) = o.overlap_irange(o_id);
         assert_eq!(o_overlap_x, 0..2);
         assert_eq!(o_overlap_y, 0..2);
+
+        // Next, test the determine_growth function.
+        let mut o = GridOverlay::new();
+        let b_id = o.add_grid_raw((10, 10), Position::origin());
+        let inside = o.determine_growth(Position { x: 0, y: 0 }, Rect { w: 5, h: 5 });
+        assert_eq!(inside, None);
+
+        // Something to the left.
+        let outside = o.determine_growth(Position { x: -5, y: 0 }, Rect { w: 3, h: 5 });
+        assert!(outside.is_some());
+        let (p, s) = outside.unwrap();
+        assert_eq!(p, Position { x: -5, y: 0 });
+        assert_eq!(s, Rect { w: 10, h: 10 });
     }
 }

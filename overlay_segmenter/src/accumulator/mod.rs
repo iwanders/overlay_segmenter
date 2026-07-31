@@ -131,6 +131,9 @@ struct Accumulation {
     accumulation_values: Tensor,
     #[serde(with = "crate::serde_tensor::tensor")]
     accumulation_counts: Tensor,
+
+    accumulation_position: Position,
+
     config: AccumulationConfig,
 }
 
@@ -179,6 +182,7 @@ impl Accumulator {
         self.accumulation = Some(Accumulation {
             accumulation_values: Tensor::zeros(&[], &Default::default())?,
             accumulation_counts: Tensor::zeros(&[], &Default::default())?,
+            accumulation_position: Position::origin(),
             config,
         });
         Ok(())
@@ -211,10 +215,87 @@ impl Accumulator {
                 frames.push((current_pos, frame.lazy_clone()?));
             }
 
-            let (values, counts) = Self::combine_frames(&frames, config.area_radius)?;
-            println!("got values and counts at: {:?}", frames[0].0);
-            // Now we need to merge values into the accrued values.
-            // Skip that for now.
+            let (values, counts, combined_origin) =
+                Self::combine_frames(&frames, config.area_radius)?;
+            // First see if this is hte first frame.
+            let accumulation_mut = self.accumulation.as_mut().unwrap();
+            if accumulation_mut.accumulation_counts.dim() == 0 {
+                accumulation_mut.accumulation_counts = counts;
+                accumulation_mut.accumulation_values = values;
+            } else {
+                // Create a grid for the accumulation so far.
+                let mut grid = GridOverlay::new();
+                let orig_id = grid.add_tensor(
+                    &accumulation_mut.accumulation_counts,
+                    accumulation_mut.accumulation_position,
+                );
+
+                let start_extent = grid.extent();
+
+                // Next, add the new tensors.
+                let new_id = grid.add_tensor(&values, combined_origin);
+
+                if start_extent != grid.extent() {
+                    println!(
+                        "accumulation_mut.accumulation_counts shape: {:?}",
+                        accumulation_mut.accumulation_counts.shape()
+                    );
+                    // Allocate new tensors, then copy the data.
+                    // I should add that 'derivate of' new zero.
+                    let (w, h) = grid.full_size();
+                    let options = flash_powder::factory::TensorOptions {
+                        dtype: Some(accumulation_mut.accumulation_counts.dtype()),
+                        device: Some(accumulation_mut.accumulation_counts.device()),
+                        ..Default::default()
+                    };
+                    let mut new_counts: Tensor = Tensor::zeros(&[1, h, w], &options)?;
+                    let options = flash_powder::factory::TensorOptions {
+                        dtype: Some(accumulation_mut.accumulation_values.dtype()),
+                        device: Some(accumulation_mut.accumulation_values.device()),
+                        ..Default::default()
+                    };
+                    let c = accumulation_mut.accumulation_values.isize(-3);
+                    let mut new_values: Tensor = Tensor::zeros(&[c, h, w], &options)?;
+
+                    // Next, do the blitting.
+                    let (ax, ay) = grid.full_grid_irange(orig_id);
+                    new_values
+                        .i_mut((.., ay, ax))?
+                        .copy_from_tensor(&accumulation_mut.accumulation_values)?;
+                    let (ax, ay) = grid.full_grid_irange(orig_id);
+                    new_counts
+                        .i_mut((.., ay, ax))?
+                        .copy_from_tensor(&accumulation_mut.accumulation_counts)?;
+                    accumulation_mut.accumulation_counts = new_counts;
+                    accumulation_mut.accumulation_values = new_values;
+                }
+
+                // Now the grid is always the correct size, and we can do the addition thing.
+
+                let (ax, ay) = grid.full_grid_irange(new_id);
+                let current_values =
+                    accumulation_mut
+                        .accumulation_values
+                        .i((.., ay.clone(), ax.clone()))?;
+                let with_addition = current_values.add(&values.squeeze()?)?;
+                accumulation_mut
+                    .accumulation_values
+                    .i_mut((.., ay.clone(), ax.clone()))?
+                    .copy_from_tensor(&with_addition)?;
+
+                // And repeat for counts;
+                let (ax, ay) = grid.full_grid_irange(new_id);
+                let current_counts =
+                    accumulation_mut
+                        .accumulation_counts
+                        .i((.., ay.clone(), ax.clone()))?;
+                let with_addition = current_counts.add(&counts.squeeze()?)?;
+                accumulation_mut
+                    .accumulation_counts
+                    .i_mut((.., ay.clone(), ax.clone()))?
+                    .copy_from_tensor(&with_addition)?;
+            }
+
             // Pop the frame from the front.
             let (ancestor_id, ancestor) = self.localized_frames.pop_first().unwrap();
             // Update the frame relations, also make sure that we incorporate the position...
@@ -238,6 +319,44 @@ impl Accumulator {
         Ok(())
     }
 
+    pub fn accumulate_postprocess(&self, debug_dir: Option<&Path>) -> StableTorchResult<Tensor> {
+        if self.accumulation.is_none() {
+            anyhow::bail!("trying to accumulate without config");
+        }
+        let accumulate = self.accumulation.as_ref().unwrap();
+        // Now that we are here, we can divide the actual values by the counts... and we should get a pristine image.
+        // Acounts contains zeros, which is a problem as it blows up the values to nan, so on the locations where the
+        // count is actually zero, we just add one, this shouldn't matter as the values there should be zero.
+        let zero: Tensor = 0i64.try_into()?;
+        let positions_with_zero = accumulate
+            .accumulation_counts
+            .eq(&zero)?
+            .squeeze()?
+            .to_owned()?;
+        let zeros_made_into_ones_but_counts_else =
+            accumulate.accumulation_counts.add(&positions_with_zero)?;
+
+        if let Some(debug_dir) = debug_dir {
+            zeros_made_into_ones_but_counts_else
+                .image_scale_to_domain()?
+                .save_image(debug_dir.join(format!("zeros_made_into_ones_but_counts_else.png")))?;
+        }
+
+        let r = accumulate.accumulation_values.div(
+            &zeros_made_into_ones_but_counts_else
+                .to(&accumulate.accumulation_values.dtype().into())?,
+        )?;
+
+        // We can do this to further clean it up, accepting only data where 'n' observations were present.
+        let two: Tensor = (accumulate.config.min_observations as i64).try_into()?;
+        let positions_with_twos = accumulate
+            .accumulation_counts
+            .ge(&two)?
+            .squeeze()?
+            .to_owned()?;
+        let r = r.mul(&positions_with_twos)?;
+        return Ok(r);
+    }
     pub fn feed_logits_frame(
         &mut self,
         frame: &Ten<'_>,
@@ -319,7 +438,7 @@ impl Accumulator {
                     grid.add_tensor(&base.frame.ten()?, (parent_pos + frame_match.pos).into()),
                 );
             } else {
-                grid_ids.insert(*i, grid.add_tensor(&base.frame.ten()?, (0, 0)));
+                grid_ids.insert(*i, grid.add_tensor(&base.frame.ten()?, Position::origin()));
             }
         }
 
@@ -367,10 +486,10 @@ impl Accumulator {
     pub fn combine_frames(
         frames: &[(Position, Tensor)],
         area_radius: usize,
-    ) -> StableTorchResult<(Tensor, Tensor)> {
+    ) -> StableTorchResult<(Tensor, Tensor, Position)> {
         let mut grid = GridOverlay::new();
         for (position, t) in frames.iter() {
-            grid.add_tensor(t, (position.x, position.y));
+            grid.add_tensor(t, *position);
         }
         if frames.is_empty() {
             anyhow::bail!("no frames provided")
@@ -418,7 +537,7 @@ impl Accumulator {
                 .copy_from_tensor(&with_addition)?;
         }
 
-        Ok((values, counts))
+        Ok((values, counts, grid.extent().0))
     }
 
     // This currently breaks down as we don't account for the 'revealed' area, and only sections that are in view
@@ -442,7 +561,7 @@ impl Accumulator {
             frames.push((current_pos, localized_frame.frame.lazy_clone()?));
         }
 
-        let (values, counts) = Self::combine_frames(&frames, area_radius)?;
+        let (values, counts, _position) = Self::combine_frames(&frames, area_radius)?;
 
         // Now that we are here, we can divide the actual values by the counts... and we should get a pristine image.
         // Acounts contains zeros, which is a problem as it blows up the values to nan, so on the locations where the

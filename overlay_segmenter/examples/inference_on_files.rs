@@ -152,7 +152,6 @@ pub fn main() -> Result<(), anyhow::Error> {
         println!("output_path: {output_path:?}");
 
         // Next apply the color mask.
-
         let pixel_index = mask_image.argmax(Some(0), Some(true))?;
         let color_per_pixel = palette
             .index_tensor(&[pixel_index])?
@@ -179,8 +178,19 @@ pub fn main() -> Result<(), anyhow::Error> {
     if let Some(accumulator) = accumulator.as_mut() {
         if let Some(path) = args.output.as_ref() {
             if args.enable {
-                todo!();
-                // accumulator.accumulate_dump(&path)?;
+                let r = accumulator.accumulate_postprocess(Some(&path))?; // Next apply the color mask.
+                let pixel_index = r.argmax(Some(0), Some(true))?;
+                let color_per_pixel = palette
+                    .index_tensor(&[pixel_index])?
+                    .squeeze()?
+                    .to_owned()?;
+
+                //img = tensor_to_image(&color_per_pixel.ten()?)?;
+                let color_per_pixel = color_per_pixel.to(&fp::Device::CPU.into())?;
+                let color_per_pixel = color_per_pixel.permute(&[2, 0, 1])?.contiguous()?;
+                let img = color_per_pixel.to_dynamic_image()?;
+
+                img.save("/tmp/supercombine.png")?;
             } else {
                 accumulator.debug_use_accumulation(&path)?;
             }

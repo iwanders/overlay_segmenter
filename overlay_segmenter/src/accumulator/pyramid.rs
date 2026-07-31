@@ -95,8 +95,8 @@ impl Pyramid {
                 // of the resolution loss.
                 let base_pos = (pos.0 / b.scale, pos.1 / b.scale);
                 let mut grid = GridOverlay::new();
-                let base_id = grid.add_tensor(&base_img, base_pos);
-                let other_id = grid.add_tensor(&other_img, (0, 0));
+                let base_id = grid.add_tensor(&base_img, base_pos.into());
+                let other_id = grid.add_tensor(&other_img, (0, 0).into());
                 let (bx, by) = grid.overlap_irange(base_id);
                 let (ox, oy) = grid.overlap_irange(other_id);
                 let base_img = base_img.i((.., .., by, bx))?;
@@ -201,8 +201,8 @@ fn overlay_tensors(
     b_pos: (isize, isize),
 ) -> StableTorchResult<Tensor> {
     let mut grid = GridOverlay::new();
-    let a_id = grid.add_tensor(a, a_pos);
-    let b_id = grid.add_tensor(b, b_pos);
+    let a_id = grid.add_tensor(a, a_pos.into());
+    let b_id = grid.add_tensor(b, b_pos.into());
     let (w, h) = grid.full_size();
 
     let options = flash_powder::factory::TensorOptions {
