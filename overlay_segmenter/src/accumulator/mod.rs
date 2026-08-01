@@ -222,6 +222,7 @@ impl Accumulator {
             if accumulation_mut.accumulation_counts.dim() == 0 {
                 accumulation_mut.accumulation_counts = counts;
                 accumulation_mut.accumulation_values = values;
+                accumulation_mut.accumulation_position = bottom_left_corner.into();
             } else {
                 // Create a grid for the accumulation so far.
                 let mut grid = GridOverlay::new();
@@ -233,10 +234,7 @@ impl Accumulator {
                 let start_extent = grid.extent();
 
                 // Next, add the new tensors.
-                let new_id = grid.add_tensor(
-                    &values,
-                    bottom_left_corner - accumulation_mut.accumulation_position,
-                );
+                let new_id = grid.add_tensor(&values, bottom_left_corner);
 
                 if start_extent != grid.extent() {
                     println!(
@@ -276,8 +274,8 @@ impl Accumulator {
                     let grid_pos = grid.full_position();
                     accumulation_mut.accumulation_position = grid_pos.into();
 
-                    accumulation_mut.origin_in_accumulation =
-                        grid.position_in_grid(accumulation_mut.accumulation_position);
+                    // accumulation_mut.accumulation_position =
+                    //     grid_pos - grid.position_in_grid(accumulation_mut.accumulation_position);
                 }
 
                 // Now the grid is always the correct size, and we can do the addition thing.
