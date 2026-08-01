@@ -174,7 +174,7 @@ impl GridOverlay {
     }
 
     pub fn full_position(&self) -> Position {
-        let (min, max) = self.extent();
+        let (min, _max) = self.extent();
         min.into()
     }
 

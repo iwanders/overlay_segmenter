@@ -53,8 +53,8 @@ pub fn main() -> Result<(), anyhow::Error> {
         let mut accum = overlay_segmenter::accumulator::Accumulator::new();
         Some(if args.enable {
             let config = overlay_segmenter::accumulator::AccumulationConfig {
-                fit_against_previous_frames: 3,
-                min_observations: 0,
+                fit_against_previous_frames: 4,
+                min_observations: 1,
                 area_radius: 15,
                 layer_count: 3,
             };

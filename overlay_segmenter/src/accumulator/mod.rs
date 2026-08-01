@@ -1,6 +1,6 @@
 use flash_powder as fp;
 use flash_powder::prelude::*;
-use flash_powder::{Ten, TenMut, Tensor, nn};
+use flash_powder::{Ten, Tensor, nn};
 use flash_powder_image::prelude::*;
 use std::path::Path;
 pub mod grid;
@@ -305,7 +305,7 @@ impl Accumulator {
             }
 
             // Pop the frame from the front.
-            let (ancestor_id, ancestor) = self.localized_frames.pop_first().unwrap();
+            let _ = self.localized_frames.pop_first().unwrap();
         }
 
         Ok(())
@@ -470,7 +470,7 @@ impl Accumulator {
         let mut canvas: Tensor = Tensor::zeros(&[3, h, w], &options)?;
 
         let mut channel = 0;
-        for (grid_id, (stable_id, localized_frame)) in grid.ids().zip(self.localized_frames.iter())
+        for (grid_id, (_stable_id, localized_frame)) in grid.ids().zip(self.localized_frames.iter())
         {
             let (ax, ay) = grid.full_grid_irange(grid_id);
             canvas
@@ -602,7 +602,7 @@ impl Accumulator {
         Ok(v)
     }
 
-    pub fn into_device(mut self, device: fp::Device) -> StableTorchResult<Self> {
+    pub fn into_device(self, device: fp::Device) -> StableTorchResult<Self> {
         let mut localized_frames = BTreeMap::new();
         for (id, p) in self.localized_frames.into_iter() {
             localized_frames.insert(id, p.into_device(&device)?);
@@ -622,11 +622,11 @@ impl Accumulator {
         if self.frame_count() > 1 {
             let (_, r) = self.localized_frames.pop_first()?;
             let LocalizedFrame {
-                id,
+                id: _,
                 frame,
                 pyramid,
                 frame_relation,
-                global_pos,
+                global_pos: _,
             } = r;
             Some((frame, frame_relation, pyramid))
         } else {
@@ -652,7 +652,6 @@ mod test {
 
         // let black = Tensor::zeros(&[h, w], &Default::default())?;
         // let black = black;
-        let zero: Tensor = 0.0f32.try_into()?;
         let half: Tensor = 0.01f32.try_into()?;
         let black = other.mul(&half)?;
 
