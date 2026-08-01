@@ -145,6 +145,7 @@ struct LocalizedFrame {
     frame: Tensor,
     pyramid: Pyramid,
     frame_relation: FrameRelation,
+    global_pos: Position,
 }
 impl LocalizedFrame {
     pub fn into_device(self, device: &fp::Device) -> StableTorchResult<Self> {
@@ -156,6 +157,7 @@ impl LocalizedFrame {
             })?,
             pyramid: self.pyramid.into_device(*device)?,
             frame_relation: self.frame_relation,
+            global_pos: self.global_pos,
         })
     }
 }
@@ -207,13 +209,10 @@ impl Accumulator {
                 .values()
                 .take(config.fit_against_previous_frames)
             {
-                let offset = localized_frame
-                    .frame_relation
-                    .best_match()
-                    .map(|(_, p, _)| p)
-                    .unwrap_or(Position::origin());
-                let current_pos = offset;
-                frames.push((current_pos, localized_frame.frame.lazy_clone()?));
+                frames.push((
+                    localized_frame.global_pos,
+                    localized_frame.frame.lazy_clone()?,
+                ));
             }
 
             let (values, counts, bottom_left_corner) =
@@ -228,8 +227,7 @@ impl Accumulator {
                 let mut grid = GridOverlay::new();
                 let orig_id = grid.add_tensor(
                     &accumulation_mut.accumulation_counts,
-                    accumulation_mut.accumulation_position
-                        - accumulation_mut.origin_in_accumulation,
+                    accumulation_mut.accumulation_position,
                 );
 
                 let start_extent = grid.extent();
@@ -310,22 +308,6 @@ impl Accumulator {
 
             // Pop the frame from the front.
             let (ancestor_id, ancestor) = self.localized_frames.pop_first().unwrap();
-            // Update the frame relations, also make sure that we incorporate the position...
-            // Ugh, these indices don't match anymore.
-
-            for (_id, entry) in self.localized_frames.iter_mut() {
-                for rel in entry.frame_relation.matches.iter_mut() {
-                    if rel.frame_index == ancestor_id && false {
-                        // offset the ancestor position with the current accumulated result.
-                        rel.pos = rel.pos
-                            + ancestor
-                                .frame_relation
-                                .best_match()
-                                .map(|(_, p, _)| p)
-                                .unwrap_or(Position::origin())
-                    }
-                }
-            }
         }
 
         Ok(())
@@ -411,13 +393,23 @@ impl Accumulator {
             });
         }
         let id = StableFrameId(new_frame_index);
+        let frame_relation = FrameRelation { matches };
+        let best_match = frame_relation.best_match();
+        let global_pos = if let Some((_score, _pos, _framematch)) = best_match {
+            let best_frame = self.localized_frames.get(&_framematch.frame_index).unwrap();
+            best_frame.global_pos + _pos
+        } else {
+            Position::origin()
+        };
+        println!("Inserting frame with {id:?} at {global_pos:?}");
         self.localized_frames.insert(
             id,
             LocalizedFrame {
                 id,
                 frame,
                 pyramid: multi_res_stack,
-                frame_relation: FrameRelation { matches },
+                frame_relation,
+                global_pos,
             },
         );
 
@@ -636,6 +628,7 @@ impl Accumulator {
                 frame,
                 pyramid,
                 frame_relation,
+                global_pos,
             } = r;
             Some((frame, frame_relation, pyramid))
         } else {
