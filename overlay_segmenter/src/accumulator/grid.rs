@@ -173,7 +173,7 @@ impl GridOverlay {
         (diff.x as usize, diff.y as usize)
     }
 
-    pub fn full_position(&self) -> (isize, isize) {
+    pub fn full_position(&self) -> Position {
         let (min, max) = self.extent();
         min.into()
     }

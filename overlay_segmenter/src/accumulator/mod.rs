@@ -202,7 +202,6 @@ impl Accumulator {
         if self.localized_frames.len() >= config.fit_against_previous_frames {
             // Stack 'n' frames together, filter them, and merge them into the main accumulation.
             let mut frames = vec![];
-            let mut current_pos = Position::origin();
             for localized_frame in self
                 .localized_frames
                 .values()
@@ -213,11 +212,11 @@ impl Accumulator {
                     .best_match()
                     .map(|(_, p, _)| p)
                     .unwrap_or(Position::origin());
-                current_pos = current_pos + offset;
+                let current_pos = offset;
                 frames.push((current_pos, localized_frame.frame.lazy_clone()?));
             }
 
-            let (values, counts, combined_origin) =
+            let (values, counts, bottom_left_corner) =
                 Self::combine_frames(&frames, config.area_radius)?;
             // First see if this is hte first frame.
             let accumulation_mut = self.accumulation.as_mut().unwrap();
@@ -229,13 +228,17 @@ impl Accumulator {
                 let mut grid = GridOverlay::new();
                 let orig_id = grid.add_tensor(
                     &accumulation_mut.accumulation_counts,
-                    accumulation_mut.accumulation_position,
+                    accumulation_mut.accumulation_position
+                        - accumulation_mut.origin_in_accumulation,
                 );
 
                 let start_extent = grid.extent();
 
                 // Next, add the new tensors.
-                let new_id = grid.add_tensor(&values, combined_origin);
+                let new_id = grid.add_tensor(
+                    &values,
+                    bottom_left_corner - accumulation_mut.accumulation_position,
+                );
 
                 if start_extent != grid.extent() {
                     println!(
@@ -312,7 +315,7 @@ impl Accumulator {
 
             for (_id, entry) in self.localized_frames.iter_mut() {
                 for rel in entry.frame_relation.matches.iter_mut() {
-                    if rel.frame_index == ancestor_id {
+                    if rel.frame_index == ancestor_id && false {
                         // offset the ancestor position with the current accumulated result.
                         rel.pos = rel.pos
                             + ancestor
@@ -546,7 +549,7 @@ impl Accumulator {
                 .copy_from_tensor(&with_addition)?;
         }
 
-        Ok((values, counts, grid.extent().0))
+        Ok((values, counts, grid.full_position().into()))
     }
 
     // This currently breaks down as we don't account for the 'revealed' area, and only sections that are in view
@@ -693,6 +696,38 @@ mod test {
             .best_match()
             .unwrap();
         assert_eq!(best_fit.1, Position::new(-50, -32));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_accumulator_online() -> StableTorchResult<()> {
+        let frame_0 = make_circle_logits(30, 30)?;
+        let frame_1 = make_circle_logits(30 + 10, 30 + 10)?;
+        let frame_2 = make_circle_logits(30 + 20, 30 + 20)?;
+        let frame_3 = make_circle_logits(30 + 30, 30 + 30)?;
+        let frame_4 = make_circle_logits(30 + 40, 30 + 40)?;
+
+        let mut accumulator = Accumulator::new();
+        let config = AccumulationConfig {
+            fit_against_previous_frames: 3,
+            min_observations: 0,
+            area_radius: 15,
+            layer_count: 3,
+        };
+        accumulator.enable_accumulator(config)?;
+
+        accumulator.accumulate_logits_frame(&frame_0.ten()?)?;
+        accumulator.accumulate_logits_frame(&frame_1.ten()?)?;
+        accumulator.accumulate_logits_frame(&frame_2.ten()?)?;
+        accumulator.accumulate_logits_frame(&frame_3.ten()?)?;
+        accumulator.accumulate_logits_frame(&frame_4.ten()?)?;
+
+        let r = accumulator.accumulate_postprocess(None)?;
+
+        let img = r.to_dynamic_image()?;
+
+        img.save("/tmp/test_accumulator_online.png")?;
 
         Ok(())
     }
