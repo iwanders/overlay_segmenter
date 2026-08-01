@@ -214,7 +214,7 @@ impl Accumulator {
                     .map(|(_, p, _)| p)
                     .unwrap_or(Position::origin());
                 current_pos = current_pos + offset;
-                frames.push((current_pos, frame.lazy_clone()?));
+                frames.push((current_pos, localized_frame.frame.lazy_clone()?));
             }
 
             let (values, counts, combined_origin) =
