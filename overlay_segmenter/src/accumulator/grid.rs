@@ -374,7 +374,7 @@ mod test {
 
         // Next, test the determine_growth function.
         let mut o = GridOverlay::new();
-        let b_id = o.add_grid_raw((10, 10), Position::origin());
+        let _b_id = o.add_grid_raw((10, 10), Position::origin());
         let inside = o.determine_growth(Position { x: 0, y: 0 }, Rect { w: 5, h: 5 });
         assert_eq!(inside, None);
 

@@ -297,7 +297,6 @@ mod test {
 
         // let black = Tensor::zeros(&[h, w], &Default::default())?;
         // let black = black;
-        let zero: Tensor = 0.0f32.try_into()?;
         let half: Tensor = 0.5f32.try_into()?;
         let black = other.mul(&half)?;
 

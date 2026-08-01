@@ -133,7 +133,6 @@ struct Accumulation {
     accumulation_counts: Tensor,
 
     accumulation_position: Position,
-    origin_in_accumulation: Position,
 
     config: AccumulationConfig,
 }
@@ -145,6 +144,7 @@ struct LocalizedFrame {
     frame: Tensor,
     pyramid: Pyramid,
     frame_relation: FrameRelation,
+    /// This is the accumulated global position, determined against the best matching of the frame relations.
     global_pos: Position,
 }
 impl LocalizedFrame {
@@ -186,7 +186,7 @@ impl Accumulator {
             accumulation_values: Tensor::zeros(&[], &Default::default())?,
             accumulation_counts: Tensor::zeros(&[], &Default::default())?,
             accumulation_position: Position::origin(),
-            origin_in_accumulation: Position::origin(),
+
             config,
         });
         Ok(())
@@ -273,9 +273,6 @@ impl Accumulator {
                     // We need to correct the position when this happens.
                     let grid_pos = grid.full_position();
                     accumulation_mut.accumulation_position = grid_pos.into();
-
-                    // accumulation_mut.accumulation_position =
-                    //     grid_pos - grid.position_in_grid(accumulation_mut.accumulation_position);
                 }
 
                 // Now the grid is always the correct size, and we can do the addition thing.
@@ -643,19 +640,14 @@ mod test {
     fn make_circle_logits(cx: isize, cy: isize) -> StableTorchResult<Tensor> {
         let (h, w) = (128usize, 128usize);
         let r = 16;
-        // `other`'s disk is shifted by (+20, +12) in (x, y) relative to `base`'s.
         let other = circle_image(h, w, cx, cy, r)?;
 
         let zero: Tensor = 0.0f32.try_into()?;
         let one: Tensor = 3.0f32.try_into()?;
         let base = other.eq(&zero)?.mul(&one)?;
 
-        // let black = Tensor::zeros(&[h, w], &Default::default())?;
-        // let black = black;
         let half: Tensor = 0.01f32.try_into()?;
         let black = other.mul(&half)?;
-
-        // Next we need to stack that.
 
         fp::torch::stack(&[base.ten()?, other.ten()?, black.ten()?], 0)?
             .unsqueeze(0)?
@@ -666,10 +658,6 @@ mod test {
     fn test_accumulator() -> StableTorchResult<()> {
         let frame_0 = make_circle_logits(30, 30)?;
         let frame_1 = make_circle_logits(30 + 50, 30 + 32)?;
-        // frame_0.save_image("/tmp/frame_0.png")?;
-        // frame_1.save_image("/tmp/frame_1.png")?;
-        // println!("base; {:?}", frame_0.shape());
-        // println!("other; {:?}", frame_1.shape());
 
         let mut accum = Accumulator::new();
 
@@ -715,9 +703,12 @@ mod test {
 
         let r = accumulator.accumulate_postprocess(None)?;
 
-        let img = r.to_dynamic_image()?;
+        let zero: Tensor = 0.0f32.try_into()?;
+        let r_nonzero = r.i((2, 1..128, 0..128))?.ne(&zero)?;
+        let z: usize = r_nonzero.bools_ref()?.iter().map(|b| *b as usize).sum();
 
-        img.save("/tmp/test_accumulator_online.png")?;
+        // Hardcoded value from visual inspection, if the spheres are not aligned this number is incorrect.
+        assert_eq!(z, 2969);
 
         Ok(())
     }
