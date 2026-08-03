@@ -46,6 +46,12 @@ We want do to this all in a live way, so not keep around all the frames.
 Keep the total accumulated result away from the logit frames, otherwise the total result becomes slower and slower
 as time goes on and map size grows? But at the cost of drift... maybe we should anchor against the accumulated result?
 
+
+Notes from running live:
+    - When we lose frames, the window may disconnect from the global estimate, probably want to match against the global afterall?
+    - The area_radius value tanks performance.
+    - Area radius trick also doesn't work to clean up detections that happened once, since we don't actually see anything around there so we
+      end up not clearing it. Should we just do a circle around the center of the screen? But still fit with everything?
 */
 
 #[derive(Debug, Copy, Clone, Deserialize, Serialize)]
