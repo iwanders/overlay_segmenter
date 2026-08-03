@@ -19,20 +19,54 @@ reloader.html;
 python3 -m http.server
 */
 
+use clap::Parser;
+
+use std::path::PathBuf;
+
+/// Run inference on files.
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Path to the safetensors file.
+    #[arg(short, long)]
+    model: PathBuf,
+
+    /// Run the accumulator
+    #[arg(short, long)]
+    accumulate: bool,
+    /// Use the combined accumulation
+    #[arg(short, long)]
+    enable: bool,
+
+    /// Downscale raw images by this factor.
+    #[arg(short, long)]
+    downscale: Option<usize>,
+}
+
 pub fn main() -> Result<(), anyhow::Error> {
-    use std::path::PathBuf;
+    let args = Args::parse();
 
-    let args = std::env::args().collect::<Vec<String>>();
+    let (unet, device, palette) = overlay_segmenter::common_setup(&args.model)?;
 
-    let safetensors_path = if let Some(path) = args.get(1) {
-        path.to_owned()
+    let mut accumulator = if args.accumulate {
+        let mut accum = overlay_segmenter::accumulator::Accumulator::new();
+        Some(if args.enable {
+            let config = overlay_segmenter::accumulator::AccumulationConfig {
+                fit_against_previous_frames: 2,
+                min_observations: 2,
+                area_radius: 10,
+                layer_count: 3,
+            };
+            accum.enable_accumulator(config)?;
+            accum
+        } else {
+            accum
+        })
     } else {
-        bail!("missing safetensors argument")
+        None
     };
-    // Verify weights exist, if not give a nice warning.
-    let weights = PathBuf::from(safetensors_path);
 
-    let (unet, device, palette) = overlay_segmenter::common_setup(&weights)?;
+    let palette = palette.to(&device.into())?;
 
     // Next, create the grabber
     let mut grabber = screen_capture::capture()?;
@@ -57,7 +91,6 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     const WRITE_RGB_TO_DISK: bool = true;
     const PRINT_DURATIONS: bool = true;
-    const USE_SOFTMAX_THRESHOLDING: bool = true;
     let palette = palette.to(&device.into())?;
 
     let global_start = Instant::now();
@@ -88,7 +121,27 @@ pub fn main() -> Result<(), anyhow::Error> {
 
         let img = colors_correct.image_floatify(&device.into())?;
         let channels_stacked = img.to(&unet.dtype().into())?;
-        let image = channels_stacked.unsqueeze(0)?;
+        //let dimension = (.., 64..(896 + 64), 128..1792); // 1664x832
+        //let indexed = channels_stacked.i(dimension.clone())?;
+        let indexed = channels_stacked.ten()?;
+
+        println!("indexed before: {:?}", indexed.shape());
+        let (orig_crop_w, orig_crop_h) = (indexed.isize(-1), indexed.isize(-2));
+        let indexed = if let Some(downscale) = args.downscale {
+            let w = orig_crop_w / downscale;
+            let h = orig_crop_h / downscale;
+            indexed
+                .image_resize(
+                    [h, w],
+                    flash_powder::nn::functional::InterpolateAlgorithm::Nearest,
+                )?
+                .squeeze()?
+                .to_owned()?
+        } else {
+            indexed.to_owned()?
+        };
+        println!("indexed size: {:?}", indexed.shape());
+        let image = indexed.unsqueeze(0)?;
 
         let r = unet.forward(&image.ten()?)?;
         let duration = (std::time::Instant::now() - start).as_secs_f64();
@@ -96,8 +149,20 @@ pub fn main() -> Result<(), anyhow::Error> {
             println!(" Acquisition and prep {duration:.4}s");
         }
 
-        let output = r.squeeze()?;
+        if let Some(accumulator) = accumulator.as_mut() {
+            if args.enable {
+                accumulator.accumulate_logits_frame(&r.ten()?)?;
+            } else {
+                accumulator.feed_logits_frame(
+                    &r.ten()?,
+                    4 - args.downscale.unwrap_or(1).ilog2() as usize,
+                    None,
+                )?;
+            }
+        }
+        let r = r.squeeze()?;
 
+        /*
         let output = if USE_SOFTMAX_THRESHOLDING {
             let sm = fp::nn::functional::softmax_int(&output, 0, None)?;
             let threshold: Tensor = 0.3.try_into()?;
@@ -121,17 +186,36 @@ pub fn main() -> Result<(), anyhow::Error> {
             let img = color_per_pixel.to_dynamic_image()?;
             img.save("/tmp/output_mask.png")?;
         }
-
+        */
         let time_taken = (Instant::now() - start).as_secs_f32();
         let global_time_taken = (Instant::now() - global_start).as_secs_f64() / loop_counter as f64;
         let global_fps = 1.0 / global_time_taken;
 
         if PRINT_DURATIONS {
             println!(
-                "Saved {output_path:?} took {time_taken:.4}s   avg: {global_time_taken:.4}s {global_fps:.1} fps  ({:?})",
-                color_per_pixel.shape()
+                "Saved {output_path:?} took {time_taken:.4}s   avg: {global_time_taken:.4}s {global_fps:.1} fps   ",
             );
         }
+
+        if let Some(accumulator) = accumulator.as_mut() {
+            let r = accumulator.accumulate_postprocess(None)?; // Next apply the color mask.
+            if r.dim() == 0 {
+                continue;
+            }
+            let pixel_index = r.argmax(Some(0), Some(true))?;
+            let color_per_pixel = palette
+                .index_tensor(&[pixel_index])?
+                .squeeze()?
+                .to_owned()?;
+
+            //img = tensor_to_image(&color_per_pixel.ten()?)?;
+            let color_per_pixel = color_per_pixel.to(&fp::Device::CPU.into())?;
+            let color_per_pixel = color_per_pixel.permute(&[2, 0, 1])?.contiguous()?;
+            let img = color_per_pixel.to_dynamic_image()?;
+
+            img.save("/tmp/output_mask.png")?;
+        }
+
         let remaining_sleep = (interval - time_taken).max(0.0);
         std::thread::sleep(Duration::from_secs_f32(remaining_sleep));
     }
