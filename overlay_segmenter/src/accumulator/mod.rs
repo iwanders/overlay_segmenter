@@ -284,27 +284,19 @@ impl Accumulator {
                 // Now the grid is always the correct size, and we can do the addition thing.
 
                 let (ax, ay) = grid.full_grid_irange(new_id);
-                let current_values =
-                    accumulation_mut
-                        .accumulation_values
-                        .i((.., ay.clone(), ax.clone()))?;
-                let with_addition = current_values.add(&values.squeeze()?)?;
+
                 accumulation_mut
                     .accumulation_values
                     .i_mut((.., ay.clone(), ax.clone()))?
-                    .copy_from_tensor(&with_addition)?;
+                    .add_assign(&values.squeeze()?)?;
 
                 // And repeat for counts;
                 let (ax, ay) = grid.full_grid_irange(new_id);
-                let current_counts =
-                    accumulation_mut
-                        .accumulation_counts
-                        .i((.., ay.clone(), ax.clone()))?;
-                let with_addition = current_counts.add(&counts.squeeze()?)?;
+
                 accumulation_mut
                     .accumulation_counts
                     .i_mut((.., ay.clone(), ax.clone()))?
-                    .copy_from_tensor(&with_addition)?;
+                    .add_assign(&counts.squeeze()?)?;
             }
 
             // Pop the frame from the front.
@@ -524,22 +516,17 @@ impl Accumulator {
             let (ax, ay) = grid.full_grid_irange(grid_id);
 
             // Then add the counts.
-            let current_counts = counts.i((.., ay.clone(), ax.clone()))?;
             let presence_mask_with_ones = inflated_non_zero_present(frame.ten()?, area_radius)?;
-
-            let with_addition = current_counts.add(&presence_mask_with_ones)?;
             counts
                 .i_mut((.., ay.clone(), ax.clone()))?
-                .copy_from_tensor(&with_addition)?;
+                .add_assign(&presence_mask_with_ones)?;
 
             // Next, we can add the values, but we also multiply those by the mask we just created.
             // Such that we only consider points in the vicinity.
-            let current_values = values.i((.., ay.clone(), ax.clone()))?;
-            let with_addition =
-                current_values.add(&frame.squeeze()?.mul(&presence_mask_with_ones)?)?;
+
             values
                 .i_mut((.., ay.clone(), ax.clone()))?
-                .copy_from_tensor(&with_addition)?;
+                .add_assign(&frame.squeeze()?.mul(&presence_mask_with_ones)?)?;
         }
 
         Ok((values, counts, grid.full_position().into()))
