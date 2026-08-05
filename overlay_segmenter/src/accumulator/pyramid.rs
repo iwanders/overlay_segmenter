@@ -82,8 +82,8 @@ impl Pyramid {
             let base_img = b.data.ten()?;
             let other_img = o.data.ten()?;
 
-            base_img.save_image(&format!("/tmp/base_for_{layer}.png"))?;
-            other_img.save_image(&format!("/tmp/other_for_{layer}.png"))?;
+            // base_img.save_image(&format!("/tmp/base_for_{layer}.png"))?;
+            // other_img.save_image(&format!("/tmp/other_for_{layer}.png"))?;
 
             let (base_img, other_img, padding) = if layer == 0 {
                 // At the first layer we do a full search, with half the dimensions of padding, this ensures that we try
