@@ -303,6 +303,124 @@ impl Accumulator {
         Ok(())
     }
 
+    pub fn accumulate_ratio_update(
+        &mut self,
+        frames: &[(Position, Tensor)],
+        config: &RatioUpdateMergeConfig,
+    ) -> StableTorchResult<()> {
+        let mut grid = GridOverlay::new();
+        let (position, values) = frames
+            .first()
+            .ok_or(anyhow::format_err!("no frames provided"))?;
+        grid.add_tensor(values, *position);
+
+        let first_frame = &frames.first().unwrap().1;
+        // let channels = first_frame.isize(-3);
+
+        // let fdtype = first_frame.dtype();
+        let values = values.squeeze()?;
+
+        // let options = flash_powder::factory::TensorOptions {
+        //     dtype: Some(fdtype),
+        //     device: Some(first_frame.device()),
+        //     ..Default::default()
+        // };
+        let (w, h) = grid.full_size();
+        let counts: Tensor = Tensor::ones(
+            &[1, h, w],
+            &flash_powder::factory::TensorOptions {
+                dtype: Some(fp::DType::I64),
+                device: Some(first_frame.device()),
+                ..Default::default()
+            },
+        )?;
+        let bottom_left_corner = grid.full_position();
+        // First see if this is hte first frame.
+        let accumulation_mut = self.accumulation.as_mut().unwrap();
+        if accumulation_mut.accumulation_counts.dim() == 0 {
+            accumulation_mut.accumulation_counts = counts;
+            accumulation_mut.accumulation_values = values.lazy_clone()?;
+            accumulation_mut.accumulation_position = bottom_left_corner.into();
+        } else {
+            // Create a grid for the accumulation so far.
+            let mut grid = GridOverlay::new();
+            let orig_id = grid.add_tensor(
+                &accumulation_mut.accumulation_counts,
+                accumulation_mut.accumulation_position,
+            );
+
+            let start_extent = grid.extent();
+
+            // Next, add the new tensors.
+            let new_id = grid.add_tensor(&values, bottom_left_corner);
+
+            if start_extent != grid.extent() {
+                println!(
+                    "accumulation_mut.accumulation_counts shape: {:?}",
+                    accumulation_mut.accumulation_counts.shape()
+                );
+                // Allocate new tensors, then copy the data.
+                // I should add that 'derivate of' new zero.
+                let (w, h) = grid.full_size();
+                let options = flash_powder::factory::TensorOptions {
+                    dtype: Some(accumulation_mut.accumulation_counts.dtype()),
+                    device: Some(accumulation_mut.accumulation_counts.device()),
+                    ..Default::default()
+                };
+                let mut new_counts: Tensor = Tensor::zeros(&[1, h, w], &options)?;
+                let options = flash_powder::factory::TensorOptions {
+                    dtype: Some(accumulation_mut.accumulation_values.dtype()),
+                    device: Some(accumulation_mut.accumulation_values.device()),
+                    ..Default::default()
+                };
+                let c = accumulation_mut.accumulation_values.isize(-3);
+                let mut new_values: Tensor = Tensor::zeros(&[c, h, w], &options)?;
+
+                // Next, do the blitting.
+                let (ax, ay) = grid.full_grid_irange(orig_id);
+                new_values
+                    .i_mut((.., ay, ax))?
+                    .copy_from_tensor(&accumulation_mut.accumulation_values)?;
+                let (ax, ay) = grid.full_grid_irange(orig_id);
+                new_counts
+                    .i_mut((.., ay, ax))?
+                    .copy_from_tensor(&accumulation_mut.accumulation_counts)?;
+                accumulation_mut.accumulation_counts = new_counts;
+                accumulation_mut.accumulation_values = new_values;
+
+                // We need to correct the position when this happens.
+                let grid_pos = grid.full_position();
+                accumulation_mut.accumulation_position = grid_pos.into();
+            }
+
+            // Now the grid is always the correct size, and we can do the addition thing.
+
+            let (ax, ay) = grid.full_grid_irange(new_id);
+
+            //  updated_map = (new_frame - map) * update_rate + map
+            let new_frame = values.squeeze()?;
+            let old_map = accumulation_mut
+                .accumulation_values
+                .i((.., ay.clone(), ax.clone()))?
+                .to_owned()?;
+            let scalar: Tensor = config.update_rate.try_into()?;
+            let combined = (new_frame.sub(&old_map)?).mul(&scalar.to(&old_map.device().into())?)?;
+            accumulation_mut
+                .accumulation_values
+                .i_mut((.., ay.clone(), ax.clone()))?
+                .add_assign(&combined)?;
+
+            // And repeat for counts;
+            let (ax, ay) = grid.full_grid_irange(new_id);
+
+            accumulation_mut
+                .accumulation_counts
+                .i_mut((.., ay.clone(), ax.clone()))?
+                .add_assign(&counts.squeeze()?)?;
+        }
+        Ok(())
+    }
+
     pub fn accumulate_logits_frame(&mut self, frame: &Ten<'_>) -> StableTorchResult<()> {
         if self.accumulation.is_none() {
             anyhow::bail!("trying to accumulate without config");
@@ -330,7 +448,9 @@ impl Accumulator {
                 MergeMode::Buffered(buffered_merge_config) => {
                     self.accumulate_merge_buffered(&frames, &buffered_merge_config)?
                 }
-                MergeMode::RatioUpdate(ratio_update_merge_config) => todo!(),
+                MergeMode::RatioUpdate(ratio_update_merge_config) => {
+                    self.accumulate_ratio_update(&frames, &ratio_update_merge_config)?
+                }
             }
 
             // Pop the frame from the front.
@@ -390,7 +510,9 @@ impl Accumulator {
             MergeMode::Buffered(buffered_merge_config) => {
                 self.accumulate_buffered(&accumulate, &buffered_merge_config, debug_dir)
             }
-            MergeMode::RatioUpdate(ratio_update_merge_config) => todo!(),
+            MergeMode::RatioUpdate(_ratio_update_merge_config) => {
+                accumulate.accumulation_values.lazy_clone()
+            }
         }
     }
 

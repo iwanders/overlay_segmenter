@@ -42,6 +42,10 @@ struct Args {
     /// Downscale raw images by this factor.
     #[arg(short, long)]
     downscale: Option<usize>,
+
+    /// Ratio'd updated
+    #[arg(short, long)]
+    update_ratio: Option<f64>,
 }
 
 pub fn main() -> Result<(), anyhow::Error> {
@@ -52,16 +56,23 @@ pub fn main() -> Result<(), anyhow::Error> {
     let mut accumulator = if args.accumulate {
         let mut accum = overlay_segmenter::accumulator::Accumulator::new();
         Some(if args.enable {
-            let config = overlay_segmenter::accumulator::AccumulationConfig {
-                fit_against_previous_frames: 3,
-
-                layer_count: 3,
-                merge_mode: overlay_segmenter::accumulator::MergeMode::Buffered(
+            let merge_mode = if let Some(ratio) = args.update_ratio {
+                overlay_segmenter::accumulator::MergeMode::RatioUpdate(
+                    overlay_segmenter::accumulator::RatioUpdateMergeConfig { update_rate: ratio },
+                )
+            } else {
+                overlay_segmenter::accumulator::MergeMode::Buffered(
                     overlay_segmenter::accumulator::BufferedMergeConfig {
                         min_observations: 3,
                         area_radius: 20,
                     },
-                ),
+                )
+            };
+            let config = overlay_segmenter::accumulator::AccumulationConfig {
+                fit_against_previous_frames: 3,
+
+                layer_count: 3,
+                merge_mode,
             };
             accum.enable_accumulator(config)?;
             accum
