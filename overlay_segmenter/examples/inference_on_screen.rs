@@ -53,9 +53,13 @@ pub fn main() -> Result<(), anyhow::Error> {
         Some(if args.enable {
             let config = overlay_segmenter::accumulator::AccumulationConfig {
                 fit_against_previous_frames: 4,
-                min_observations: 3,
-                area_radius: 20,
                 layer_count: 3,
+                merge_mode: overlay_segmenter::accumulator::MergeMode::Buffered(
+                    overlay_segmenter::accumulator::BufferedMergeConfig {
+                        min_observations: 3,
+                        area_radius: 20,
+                    },
+                ),
             };
             accum.enable_accumulator(config)?;
             accum
