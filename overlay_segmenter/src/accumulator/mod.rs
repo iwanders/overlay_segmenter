@@ -139,7 +139,41 @@ pub struct RatioUpdateMergeConfig {
 
 #[derive(Debug, Copy, Clone, Deserialize, Serialize)]
 pub enum MergeMode {
+    // All logits are softmax'd when received by the Accumulator.
+    // Position correlation is only done on the first channel (normal walls)
+    /// Update only in a buffered local area.
+    ///
+    /// For each sliding window processing:
+    ///  - Allocate processing_values (f32) and processing_counts (i64) of appropriate size
+    ///  - For frames in the sliding window:
+    ///     - Determine local vicinity boolean mask for this frame by convoluting with circle of area_radius.
+    ///     - Add values in local vicinity to processing_values at appropriate position.
+    ///     - Increment processing_counts by one for the local vicinity.
+    ///  - Merge processing_values and processing_counts into global accumulated values at correct position.
+    ///
+    /// Extract final result by:
+    ///  - Create boolean mask where global counts not zero.
+    ///  - Divide global values in the mask by counts in the mask.
+    ///
+    /// Notes:
+    ///  - Effective for walls segmented just one or two frames like near an exit.
+    ///  - Flipside of that is that it can't clear up false positives because they create a local vicinity once, which
+    ///    leads to values being populated, but because there's never a wall in the local vicinity again it never clears
+    ///    false positives.
+    ///  - Very effective against obscurations like inventory panel.
+    ///
+    /// Todo: maybe pair this with an area that's like; "only accept within", possibly based on the map-view-distance?
     Buffered(BufferedMergeConfig),
+
+    /// Combine each frame using a update rate,
+    /// updated_map = (new_frame - map) * update_rate + map
+    ///
+    /// Can recover from false positive sections.
+    ///
+    /// Notes:
+    ///   - Very clean results, good false positive rejection.
+    ///   - Does not handle obscurations well, because it updates everything in view, so inventory panel is problematic.
+    ///   - Introduces lag in information usage, resulting in map parts only seen a short while near the exit missing.
     RatioUpdate(RatioUpdateMergeConfig),
 }
 
