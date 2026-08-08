@@ -96,7 +96,8 @@ fn inflated_non_zero_present(frame: Ten<'_>, area_radius: usize) -> StableTorchR
     let non_bg_f32 = non_bg.to(&fp::DType::F32.into())?;
     let non_bg_f32 = non_bg_f32.unsqueeze(0)?;
 
-    const USE_CIRCULAR: bool = false;
+    // Don't actually seems to make any difference in performance? :/
+    const USE_CIRCULAR: bool = true;
 
     if USE_CIRCULAR {
         let convolution_circle = pyramid::circle_image(
@@ -123,7 +124,7 @@ fn inflated_non_zero_present(frame: Ten<'_>, area_radius: usize) -> StableTorchR
 
         let boolean_mask = conv2.gt(&zero_f32)?;
         let non_bg = boolean_mask.squeeze()?;
-        println!("non_bg: {:?}", non_bg.shape());
+        // println!("non_bg: {:?}", non_bg.shape());
         Ok(non_bg.to_owned()?)
     } else {
         let area_radius = if area_radius % 2 == 0 {
@@ -141,13 +142,13 @@ fn inflated_non_zero_present(frame: Ten<'_>, area_radius: usize) -> StableTorchR
         };
         let non_bg_t = non_bg.to(&fp::DType::F32.into())?;
         let non_bg_t = non_bg_t.unsqueeze(0)?;
-        println!("non_bg_t: {:?}", non_bg.shape());
-        println!("area_radius: {:?}", area_radius);
+        // println!("non_bg_t: {:?}", non_bg.shape());
+        // println!("area_radius: {:?}", area_radius);
         let r = fp::nn::functional::max_pool2d(&non_bg_t, kernel_size, &options)?;
 
         let boolean_mask = r.gt(&zero_f32)?;
         let non_bg = boolean_mask.squeeze()?;
-        println!("non_bg: {:?}", non_bg.shape());
+        // println!("non_bg: {:?}", non_bg.shape());
         Ok(non_bg.to_owned()?)
     }
 }
