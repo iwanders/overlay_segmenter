@@ -94,36 +94,62 @@ fn inflated_non_zero_present(frame: Ten<'_>, area_radius: usize) -> StableTorchR
 
     // Next, we convert that back to float sand convolute it with the inflation.
     let non_bg_f32 = non_bg.to(&fp::DType::F32.into())?;
-
-    let convolution_circle = pyramid::circle_image(
-        area_radius * 2 + 1,
-        area_radius * 2 + 1,
-        area_radius as isize,
-        area_radius as isize,
-        area_radius as isize,
-    )?;
-    let convolution_circle = convolution_circle.to(&frame.device().into())?;
-    // convolution_circle
-    //     .image_scale_to_domain()?
-    //     .save_image("/tmp/convolution_kernel.png")?;
-
-    // Next, do the actual convolution.
-    let padding = (area_radius as _, area_radius as _);
-    let options = nn::functional::Conv2dOptions {
-        padding,
-        ..Default::default()
-    };
     let non_bg_f32 = non_bg_f32.unsqueeze(0)?;
-    let conv_mask = convolution_circle.unsqueeze(0)?.unsqueeze(0)?;
 
-    let conv2 = nn::functional::conv2d(&non_bg_f32, &conv_mask, None, &options)?;
-    // conv2
-    //     .image_scale_to_domain()?
-    //     .save_image("/tmp/conv_result.png")?;
+    const USE_CIRCULAR: bool = false;
 
-    let boolean_mask = conv2.gt(&zero_f32)?;
-    let non_bg = boolean_mask.squeeze()?;
-    Ok(non_bg.to_owned()?)
+    if USE_CIRCULAR {
+        let convolution_circle = pyramid::circle_image(
+            area_radius * 2 + 1,
+            area_radius * 2 + 1,
+            area_radius as isize,
+            area_radius as isize,
+            area_radius as isize,
+        )?;
+        let convolution_circle = convolution_circle.to(&frame.device().into())?;
+        // convolution_circle
+        //     .image_scale_to_domain()?
+        //     .save_image("/tmp/convolution_kernel.png")?;
+
+        // Next, do the actual convolution.
+        let padding = (area_radius as _, area_radius as _);
+        let options = nn::functional::Conv2dOptions {
+            padding,
+            ..Default::default()
+        };
+        let conv_mask = convolution_circle.unsqueeze(0)?.unsqueeze(0)?;
+
+        let conv2 = nn::functional::conv2d(&non_bg_f32, &conv_mask, None, &options)?;
+
+        let boolean_mask = conv2.gt(&zero_f32)?;
+        let non_bg = boolean_mask.squeeze()?;
+        println!("non_bg: {:?}", non_bg.shape());
+        Ok(non_bg.to_owned()?)
+    } else {
+        let area_radius = if area_radius % 2 == 0 {
+            area_radius + 1
+        } else {
+            area_radius
+        };
+        let kernel_size = (area_radius as _, area_radius as _);
+        let padding = (kernel_size.0 / 2, kernel_size.1 / 2);
+        // Do the same, but then with maxpool 2d...
+        let options = nn::functional::MaxPool2dDOptions {
+            stride: Some((1, 1)),
+            padding,
+            ..Default::default()
+        };
+        let non_bg_t = non_bg.to(&fp::DType::F32.into())?;
+        let non_bg_t = non_bg_t.unsqueeze(0)?;
+        println!("non_bg_t: {:?}", non_bg.shape());
+        println!("area_radius: {:?}", area_radius);
+        let r = fp::nn::functional::max_pool2d(&non_bg_t, kernel_size, &options)?;
+
+        let boolean_mask = r.gt(&zero_f32)?;
+        let non_bg = boolean_mask.squeeze()?;
+        println!("non_bg: {:?}", non_bg.shape());
+        Ok(non_bg.to_owned()?)
+    }
 }
 
 #[derive(Debug, Copy, Clone, Deserialize, Serialize)]
