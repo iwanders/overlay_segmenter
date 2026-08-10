@@ -218,11 +218,8 @@ pub fn main() -> Result<(), anyhow::Error> {
             if r.dim() == 0 {
                 continue;
             }
-            let pixel_index = r.argmax(Some(0), Some(true))?;
-            let color_per_pixel = palette
-                .index_tensor(&[pixel_index])?
-                .squeeze()?
-                .to_owned()?;
+            let color_per_pixel =
+                overlay_segmenter::palette::apply_pallette(&palette.ten()?, &r.ten()?)?;
 
             //img = tensor_to_image(&color_per_pixel.ten()?)?;
             let color_per_pixel = color_per_pixel.to(&fp::Device::CPU.into())?;

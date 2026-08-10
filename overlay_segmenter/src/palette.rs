@@ -1,4 +1,5 @@
 use flash_powder::Tensor;
+use flash_powder::prelude::*;
 // -------------- hsv_to_rgb --------------
 // https://github.com/python/cpython/blob/0fff6bd86cf0224152c509e295d3cbbd209098f3/Lib/colorsys.py#L145
 
@@ -61,4 +62,29 @@ pub fn generate_color_palette(class_count: usize) -> Result<Tensor, anyhow::Erro
         colors.push(hsv_to_rgb(hue, saturation, value).into());
     }
     Tensor::from(&colors[..])
+}
+
+pub fn apply_pallette(
+    palette: &flash_powder::Ten<'_>,
+    n_channel_tensor: &flash_powder::Ten<'_>,
+) -> Result<Tensor, anyhow::Error> {
+    let pixel_index = n_channel_tensor.argmax(Some(0), Some(true))?;
+    palette.index_tensor(&[pixel_index])?.squeeze()?.to_owned()
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use flash_powder::StableTorchResult;
+    use flash_powder::prelude::*;
+    use flash_powder_image::prelude::*;
+
+    #[test]
+    fn test_palette_roundtrip() -> StableTorchResult<()> {
+        let mut d = Tensor::zeros(&[5, 6, 6], &Default::default())?;
+        d.i_mut((0..3, 0..3))?.fill_f64(1.0)?;
+        d.save_image("/tmp/fp_greyscale_f32.png").unwrap();
+
+        Ok(())
+    }
 }

@@ -168,11 +168,8 @@ pub fn main() -> Result<(), anyhow::Error> {
         println!("output_path: {output_path:?}");
 
         // Next apply the color mask.
-        let pixel_index = mask_image.argmax(Some(0), Some(true))?;
-        let color_per_pixel = palette
-            .index_tensor(&[pixel_index])?
-            .squeeze()?
-            .to_owned()?;
+        let color_per_pixel =
+            overlay_segmenter::palette::apply_pallette(&palette.ten()?, &mask_image.ten()?)?;
 
         //img = tensor_to_image(&color_per_pixel.ten()?)?;
         let color_per_pixel = color_per_pixel.to(&fp::Device::CPU.into())?;
@@ -195,11 +192,8 @@ pub fn main() -> Result<(), anyhow::Error> {
         if let Some(path) = args.output.as_ref() {
             if args.enable {
                 let r = accumulator.accumulate_postprocess(Some(&path))?; // Next apply the color mask.
-                let pixel_index = r.argmax(Some(0), Some(true))?;
-                let color_per_pixel = palette
-                    .index_tensor(&[pixel_index])?
-                    .squeeze()?
-                    .to_owned()?;
+                let color_per_pixel =
+                    overlay_segmenter::palette::apply_pallette(&palette.ten()?, &r.ten()?)?;
 
                 //img = tensor_to_image(&color_per_pixel.ten()?)?;
                 let color_per_pixel = color_per_pixel.to(&fp::Device::CPU.into())?;
