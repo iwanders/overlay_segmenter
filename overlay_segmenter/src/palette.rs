@@ -71,19 +71,65 @@ pub fn apply_pallette(
     let pixel_index = n_channel_tensor.argmax(Some(0), Some(true))?;
     palette.index_tensor(&[pixel_index])?.squeeze()?.to_owned()
 }
+pub fn unapply_pallette(
+    class_count: usize,
+    n_channel_tensor: &flash_powder::Ten<'_>,
+) -> Result<Tensor, anyhow::Error> {
+    // Lets allocate the tensor
+    let mut d = Tensor::zeros(
+        &[
+            class_count,
+            n_channel_tensor.size(0),
+            n_channel_tensor.size(1),
+        ],
+        &n_channel_tensor.device().into(),
+    )?;
+    // Next, generate the palette.
+    let palette = generate_color_palette(class_count)?;
+    println!(
+        "n_channel_tensor: {n_channel_tensor:?}, {:?}",
+        n_channel_tensor.shape()
+    );
+    println!("palette: {palette:?}, {:?}", palette.shape());
+
+    // Next, sweep over the entries in the pallette, obtain a boolean mask, and set the values in d to one.
+    for i in 0..class_count {
+        let this_color = palette.i((i as isize, ..))?;
+        println!("this_color: {this_color:?}, {:?}", this_color.shape());
+        let mask = n_channel_tensor.eq(&this_color)?.all_dim(2, None)?;
+        d.i_mut((i as isize, .., ..))?
+            .copy_from_tensor(&mask.ten()?)?;
+        println!("mask: {mask:?}");
+    }
+
+    Ok(d)
+}
 
 #[cfg(test)]
 mod test {
     use super::*;
     use flash_powder::StableTorchResult;
-    use flash_powder::prelude::*;
-    use flash_powder_image::prelude::*;
 
     #[test]
     fn test_palette_roundtrip() -> StableTorchResult<()> {
+        let palette = generate_color_palette(5)?;
+
         let mut d = Tensor::zeros(&[5, 6, 6], &Default::default())?;
-        d.i_mut((0..3, 0..3))?.fill_f64(1.0)?;
-        d.save_image("/tmp/fp_greyscale_f32.png").unwrap();
+        for i in 0..5 {
+            d.i_mut((i, .., i))?.fill_f64(1.0)?;
+        }
+        // Oh, yeah lets also set the last column to ones in the background mask since it is black.
+        d.i_mut((0, .., 5))?.fill_f64(1.0)?;
+        let color_per_pixel = apply_pallette(&palette.ten()?, &d.ten()?)?;
+        let color_per_pixel = color_per_pixel.permute(&[2, 0, 1])?.contiguous()?;
+        // color_per_pixel
+        //     .save_image("/tmp/test_overlay_segmenter_palette_applied.png")
+        //     .unwrap();
+
+        let channel_consecutive = color_per_pixel.permute(&[1, 2, 0])?.contiguous()?;
+        let back_to_probs = unapply_pallette(5, &channel_consecutive.ten()?)?;
+
+        assert!(back_to_probs.is_equal(&d)?);
 
         Ok(())
     }

@@ -455,7 +455,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 [[package]]
 name = "flash_powder"
 version = "0.1.0"
-source = "git+https://github.com/iwanders/flash_powder.git#71aed6aeea4371a293730f5b9b57fa6781d77b83"
+source = "git+https://github.com/iwanders/flash_powder.git#effea3039096ad56cc1d268842f874ef94f5586d"
 dependencies = [
  "anyhow",
  "tinyvec",
@@ -466,7 +466,7 @@ dependencies = [
 [[package]]
 name = "flash_powder_image"
 version = "0.1.0"
-source = "git+https://github.com/iwanders/flash_powder.git#71aed6aeea4371a293730f5b9b57fa6781d77b83"
+source = "git+https://github.com/iwanders/flash_powder.git#effea3039096ad56cc1d268842f874ef94f5586d"
 dependencies = [
  "anyhow",
  "flash_powder",
@@ -478,7 +478,7 @@ dependencies = [
 [[package]]
 name = "flash_powder_safetensors"
 version = "0.1.0"
-source = "git+https://github.com/iwanders/flash_powder.git#71aed6aeea4371a293730f5b9b57fa6781d77b83"
+source = "git+https://github.com/iwanders/flash_powder.git#effea3039096ad56cc1d268842f874ef94f5586d"
 dependencies = [
  "anyhow",
  "flash_powder",
@@ -1406,7 +1406,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 [[package]]
 name = "torch_stable"
 version = "0.1.0"
-source = "git+https://github.com/iwanders/flash_powder.git#71aed6aeea4371a293730f5b9b57fa6781d77b83"
+source = "git+https://github.com/iwanders/flash_powder.git#effea3039096ad56cc1d268842f874ef94f5586d"
 dependencies = [
  "anyhow",
  "cc",

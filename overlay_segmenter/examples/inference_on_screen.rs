@@ -176,9 +176,9 @@ pub fn main() -> Result<(), anyhow::Error> {
                 )?;
             }
         }
-        let r = r.squeeze()?;
 
         /*
+        let r = r.squeeze()?;
         let output = if USE_SOFTMAX_THRESHOLDING {
             let sm = fp::nn::functional::softmax_int(&output, 0, None)?;
             let threshold: Tensor = 0.3.try_into()?;
