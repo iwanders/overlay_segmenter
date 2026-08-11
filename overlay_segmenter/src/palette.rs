@@ -86,20 +86,12 @@ pub fn unapply_pallette(
     )?;
     // Next, generate the palette.
     let palette = generate_color_palette(class_count)?;
-    println!(
-        "n_channel_tensor: {n_channel_tensor:?}, {:?}",
-        n_channel_tensor.shape()
-    );
-    println!("palette: {palette:?}, {:?}", palette.shape());
-
     // Next, sweep over the entries in the pallette, obtain a boolean mask, and set the values in d to one.
     for i in 0..class_count {
         let this_color = palette.i((i as isize, ..))?;
-        println!("this_color: {this_color:?}, {:?}", this_color.shape());
         let mask = n_channel_tensor.eq(&this_color)?.all_dim(2, None)?;
         d.i_mut((i as isize, .., ..))?
             .copy_from_tensor(&mask.ten()?)?;
-        println!("mask: {mask:?}");
     }
 
     Ok(d)

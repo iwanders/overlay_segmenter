@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports)]
+
 use flash_powder as fp;
 use flash_powder::Tensor;
 use flash_powder::prelude::*;
