@@ -2,6 +2,9 @@ use flash_powder::prelude::*;
 use flash_powder::{StableTorchResult, Tensor};
 use flash_powder_image::prelude::*;
 
+/// Load a mask image (greyscale), same used by the data generator on the python side into a tensor.
+///
+/// Tensor is always f16 on the cpu.
 pub fn load_mask_image<P: AsRef<std::path::Path>>(
     v: P,
     value_to_depth_index: &[(u8, usize)],
@@ -15,7 +18,6 @@ pub fn load_mask_image<P: AsRef<std::path::Path>>(
     } else {
         img.squeeze()?.to_owned()?
     };
-    println!("img shape: {:?}", img.shape());
 
     let class_count = value_to_depth_index
         .iter()
