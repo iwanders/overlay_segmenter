@@ -8,8 +8,14 @@ pub fn load_mask_image<P: AsRef<std::path::Path>>(
 ) -> StableTorchResult<Tensor> {
     let p: &std::path::Path = &v.as_ref();
 
-    // Read the greyscale image
+    // Read just the first channel out of the image.
     let img = Tensor::read_image(p)?;
+    let img = if img.size(0) > 1 {
+        img.i((0, .., ..))?.squeeze()?.to_owned()?
+    } else {
+        img.squeeze()?.to_owned()?
+    };
+    println!("img shape: {:?}", img.shape());
 
     let class_count = value_to_depth_index
         .iter()
@@ -19,7 +25,7 @@ pub fn load_mask_image<P: AsRef<std::path::Path>>(
 
     // Next, we can create a tensor of the appropriate size.
     let mut d = Tensor::zeros(
-        &[class_count + 1, img.isize(1), img.isize(2)],
+        &[class_count + 1, img.isize(0), img.isize(1)],
         &flash_powder::DType::F16.into(),
     )?;
 
