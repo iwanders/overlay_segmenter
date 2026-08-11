@@ -8,6 +8,7 @@ pub mod serde_tensor;
 use model::{UNet, UNetOptions};
 
 pub mod accumulator;
+pub mod mask_loader;
 
 use anyhow::Context;
 pub fn create_unet(safetensors_path: &std::path::Path) -> Result<UNet, anyhow::Error> {

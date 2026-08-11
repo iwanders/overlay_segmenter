@@ -63,7 +63,7 @@ pub fn main() -> Result<(), anyhow::Error> {
             } else {
                 overlay_segmenter::accumulator::MergeMode::Buffered(
                     overlay_segmenter::accumulator::BufferedMergeConfig {
-                        min_observations: 3,
+                        min_observations: 1,
                         area_radius: 20,
                     },
                 )
