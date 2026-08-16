@@ -184,7 +184,9 @@ const SEARCH_PADDING: i64 = 2;
 /// Returns the `(value, dx, dy)` of a correlation's peak, where `dx`/`dy` are offsets from
 /// the centre of the correlation output.
 fn conv_peak(conv: &Tensor) -> StableTorchResult<(f32, isize, isize)> {
-    let (values, indices) = conv.flatten(0, None)?.topk(1, &Default::default())?;
+    let (values, indices) = conv
+        .flatten_using_ints(0, None)?
+        .topk(1, &Default::default())?;
     let value = *values.cpu()?.as_f32()?;
     let index = *indices.cpu()?.as_i64()? as isize;
     let width = conv.isize(-1) as isize;
