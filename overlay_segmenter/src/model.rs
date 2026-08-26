@@ -2,6 +2,7 @@
 //!
 //! This should be kept in sync to the Python counterpart.
 
+use flash_powder as fp;
 use flash_powder::{Ten, Tensor, nn, nn::functional, prelude::*};
 use nn::module::{Module, ModuleTensors, ModuleTensorsMut};
 
@@ -159,28 +160,28 @@ impl nn::Module for UNet {
             self.decoder_up_level4.forward(&output_bottleneck.ten()?)?;
 
         let input_decode_level_4 =
-            Tensor::cat(&[&upsample_for_decode_level_4, &encoded_level_4], 1)?;
+            fp::torch::cat(&[&upsample_for_decode_level_4, &encoded_level_4], 1)?;
         let decoded_level_4 = self.decoder_conv_4.forward(&input_decode_level_4.ten()?)?;
 
         // And then we repeat that...
         let upsample_for_decode_level_3 =
             self.decoder_up_level3.forward(&decoded_level_4.ten()?)?;
         let input_decode_level_3 =
-            Tensor::cat(&[&upsample_for_decode_level_3, &encoded_level_3], 1)?;
+            fp::torch::cat(&[&upsample_for_decode_level_3, &encoded_level_3], 1)?;
         let decoded_level_3 = self.decoder_conv_3.forward(&input_decode_level_3.ten()?)?;
 
         // And then we repeat that...
         let upsample_for_decode_level_2 =
             self.decoder_up_level2.forward(&decoded_level_3.ten()?)?;
         let input_decode_level_2 =
-            Tensor::cat(&[&upsample_for_decode_level_2, &encoded_level_2], 1)?;
+            fp::torch::cat(&[&upsample_for_decode_level_2, &encoded_level_2], 1)?;
         let decoded_level_2 = self.decoder_conv_2.forward(&input_decode_level_2.ten()?)?;
 
         // And then we repeat that...
         let upsample_for_decode_level_1 =
             self.decoder_up_level1.forward(&decoded_level_2.ten()?)?;
         let input_decode_level_1 =
-            Tensor::cat(&[&upsample_for_decode_level_1, &encoded_level_1], 1)?;
+            fp::torch::cat(&[&upsample_for_decode_level_1, &encoded_level_1], 1)?;
         let decoded_level_1 = self.decoder_conv_1.forward(&input_decode_level_1.ten()?)?;
 
         // And then the last classifier head
