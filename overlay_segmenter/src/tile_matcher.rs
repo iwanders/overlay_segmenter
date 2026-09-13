@@ -102,11 +102,11 @@ fn conv_peak(conv: &fp::Ten<'_>) -> anyhow::Result<(f32, isize, isize)> {
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub struct TileScore {
     /// Index of this tile in the tiles for consideration.
-    index: usize,
+    pub index: usize,
     /// Position of where the kernel should be position on the mask for optimal match (so top left corner)
-    position: Position,
+    pub position: Position,
     /// Score at this position.
-    score: f32,
+    pub score: f32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -115,9 +115,17 @@ pub struct ScoredConv {
     pub conv2d_values: Tensor,
     pub scores: Vec<TileScore>,
 }
+
+impl ScoredConv {
+    pub fn highest(&self) -> Option<&TileScore> {
+        self.scores
+            .iter()
+            .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap())
+    }
+}
+
 pub fn conv_mask_with_distinguishing_kernel(
     mask: &Ten<'_>,
-    mask_scale: isize,
     kernel: &Ten<'_>,
 ) -> StableTorchResult<ScoredConv> {
     let options = nn::functional::Conv2dOptions {
@@ -126,19 +134,11 @@ pub fn conv_mask_with_distinguishing_kernel(
     };
     let conv2 = nn::functional::conv2d(mask, kernel, None, &options)?;
     let conv2 = conv2.to(&fp::DType::F32.into())?;
-    println!("conv2.shape: {:?}", conv2.shape());
-
-    let mask_center_w = mask.isize(-1) / 2;
-    let mask_center_h = mask.isize(-2) / 2;
-    let kernel_center_w = kernel.isize(-1) / 2;
-    let kernel_center_h = kernel.isize(-2) / 2;
 
     let mut scores = vec![];
     for candidate_slice in 0..conv2.size(0) {
         let this_slice = conv2.i((candidate_slice as isize, .., ..))?;
         let (this_score, dx, dy) = conv_peak(&this_slice)?;
-        let dx = dx;
-        let dy = dy;
 
         scores.push(TileScore {
             index: candidate_slice,
