@@ -1,5 +1,10 @@
+use flash_powder as fp;
+use flash_powder::nn;
 use flash_powder::prelude::*;
 use flash_powder::{StableTorchResult, Ten, Tensor};
+use serde::{Deserialize, Serialize};
+
+use crate::accumulator::grid::Position;
 
 /// Create a distinguishing kernel
 ///
@@ -77,5 +82,65 @@ pub fn make_distinguishing_kernel(
             .add_assign(&positive_value_accounting)?;
     }
 
+    Ok(r)
+}
+
+/// Returns the `(value, dx, dy)` of a correlation's peak, where `dx`/`dy` are offsets from
+/// the centre of the correlation output.
+fn conv_peak(conv: &fp::Ten<'_>) -> anyhow::Result<(f32, isize, isize)> {
+    let (values, indices) = conv
+        .flatten_using_ints(0, None)?
+        .topk(1, &Default::default())?;
+    let value = *values.cpu()?.as_f32()?;
+    let index = *indices.cpu()?.as_i64()? as isize;
+    let width = conv.isize(-1) as isize;
+    let (x, y) = (index % width, index / width);
+    Ok((value, width / 2 - x, conv.isize(-2) as isize / 2 - y))
+}
+
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+pub struct TileScore {
+    index: usize,
+    position: Position,
+    score: f32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ScoredConv {
+    #[serde(with = "crate::serde_tensor::tensor")]
+    pub conv2d_values: Tensor,
+    pub scores: Vec<TileScore>,
+}
+pub fn conv_mask_with_distinguishing_kernel(
+    mask: &Ten<'_>,
+    mask_scale: isize,
+    kernel: &Ten<'_>,
+) -> StableTorchResult<ScoredConv> {
+    let options = nn::functional::Conv2dOptions {
+        padding: (0, 0),
+        ..Default::default()
+    };
+    let conv2 = nn::functional::conv2d(mask, kernel, None, &options)?;
+    let conv2 = conv2.to(&fp::DType::F32.into())?;
+    println!("conv2.shape: {:?}", conv2.shape());
+
+    let mut scores = vec![];
+    for candidate_slice in 0..conv2.size(0) {
+        let this_slice = conv2.i((candidate_slice as isize, .., ..))?;
+        let (this_score, dx, dy) = conv_peak(&this_slice)?;
+        let dx = dx * mask_scale as isize;
+        let dy = dy * mask_scale as isize;
+
+        scores.push(TileScore {
+            index: candidate_slice,
+            position: Position { x: dx, y: dy },
+            score: this_score,
+        });
+    }
+
+    let r = ScoredConv {
+        conv2d_values: conv2,
+        scores,
+    };
     Ok(r)
 }
