@@ -5,17 +5,26 @@ use flash_powder::{StableTorchResult, Ten, Tensor};
 ///
 /// Input is tile_index x channel x height x width
 /// It creates a new tensor that for each tile index considers the other tile indices' negative information.
-pub fn make_distinguishing_kernel(stacked_tensor: &Ten<'_>) -> StableTorchResult<Tensor> {
-    println!(
-        "stacked_tensor shape: {:?}, t {:?}",
-        stacked_tensor.shape(),
-        stacked_tensor.dtype()
-    );
+/// stacked_tensor: Stacked labels.
+/// channel_weights: Weighting per channel, such that more important distinguishing channels can be raised in weight. Must be equal length to channels.
+pub fn make_distinguishing_kernel(
+    stacked_tensor: &Ten<'_>,
+    channel_weights: &[f32],
+) -> StableTorchResult<Tensor> {
+    // println!(
+    //     "stacked_tensor shape: {:?}, t {:?}",
+    //     stacked_tensor.shape(),
+    //     stacked_tensor.dtype()
+    // );
 
     let _tile_count = stacked_tensor.size(0);
     let channels = stacked_tensor.size(1);
     let h = stacked_tensor.size(2);
     let w = stacked_tensor.size(3);
+
+    let channel_weighting: Tensor = channel_weights.try_into()?;
+    let channel_weighting = channel_weighting.view(&[channels, 1, 1])?;
+    let channel_weighting = channel_weighting.to(&stacked_tensor.device().into())?;
 
     let mut r = Tensor::zeros(
         stacked_tensor.sizes(),
@@ -54,14 +63,16 @@ pub fn make_distinguishing_kernel(stacked_tensor: &Ten<'_>) -> StableTorchResult
         // Thats a boolean mask... but we don't want it where this mask has values... so we remove that.
         let has_value_but_not_self_values = has_value.mul(&this_mask.eq(&zero)?)?;
         // Next, scale that mask with a negative float.
-        let negative_value_accoutning = minus_one.mul(&has_value_but_not_self_values)?;
+        let negative_value_accounting = minus_one
+            .mul(&has_value_but_not_self_values)?
+            .mul(&channel_weighting)?;
         r.i_mut((this_tile as isize, .., .., ..))?
-            .add_assign(&negative_value_accoutning)?;
+            .add_assign(&negative_value_accounting)?;
 
         let positive_scaling = 1.0;
         let positive_scalar: Tensor = positive_scaling.try_into()?;
         // Next, we need to overwrite the values that this tile has populated with a positive value.
-        let positive_value_accounting = positive_scalar.mul(&this_mask)?;
+        let positive_value_accounting = positive_scalar.mul(&this_mask)?.mul(&channel_weighting)?;
         r.i_mut((this_tile as isize, .., .., ..))?
             .add_assign(&positive_value_accounting)?;
     }
