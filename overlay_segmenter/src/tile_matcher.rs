@@ -164,30 +164,35 @@ mod test {
 
     #[test]
     fn test_conv_tile_matcher() -> StableTorchResult<()> {
-        // Lets make the kernel.
+        // Lets make the kernel with just a filled circle.
         let kernel = circle_image(8, 8, 4, 4, 4)?;
-        let f32_0_5: Tensor = 0.5.try_into()?;
-
         // Lets make an image, with two circles, one at the top right that has a 1.0 kernel, and one at the bottom
         // left with 0.5 kernel.
         let mut mask = Tensor::zeros(&[16, 16], &Default::default())?;
 
         mask.i_mut((0isize..8, 8isize..16))?.add_assign(&kernel)?;
+
+        let f32_0_5: Tensor = 0.5.try_into()?;
         mask.i_mut((8isize..16, 0isize..8))?
             .add_assign(&kernel.mul(&f32_0_5)?)?;
 
+        // Write to disk for inspection.
         mask.save_image("/tmp/test_conv_tile_matcher_mask.png")?;
         kernel.save_image("/tmp/test_conv_tile_matcher_kernel.png")?;
+
+        // It needs to have channels and such, but they can be 1 size.
         let mask = mask.unsqueeze(0)?.unsqueeze(0)?;
         let kernel = kernel.unsqueeze(0)?.unsqueeze(0)?;
 
+        // Calculate the convolution and best fit for each.
         let r = conv_mask_with_distinguishing_kernel(&mask.ten()?, &kernel.ten()?)?;
-        println!("r: {r:?}");
         let highest = r.highest();
         assert!(highest.is_some());
         let highest = highest.unwrap();
         assert_eq!(highest.position.x, 8);
-        assert_eq!(highest.position.y, 8);
+        assert_eq!(highest.position.y, 0);
+        assert_eq!(highest.score, 47.0);
+        assert_eq!(highest.index, 0);
 
         Ok(())
     }
