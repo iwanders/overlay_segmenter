@@ -153,3 +153,42 @@ pub fn conv_mask_with_distinguishing_kernel(
     };
     Ok(r)
 }
+
+#[cfg(test)]
+mod test {
+    use flash_powder_image::TensorToImage as _;
+
+    use crate::accumulator::pyramid::circle_image;
+
+    use super::*;
+
+    #[test]
+    fn test_conv_tile_matcher() -> StableTorchResult<()> {
+        // Lets make the kernel.
+        let kernel = circle_image(8, 8, 4, 4, 4)?;
+        let f32_0_5: Tensor = 0.5.try_into()?;
+
+        // Lets make an image, with two circles, one at the top right that has a 1.0 kernel, and one at the bottom
+        // left with 0.5 kernel.
+        let mut mask = Tensor::zeros(&[16, 16], &Default::default())?;
+
+        mask.i_mut((0isize..8, 8isize..16))?.add_assign(&kernel)?;
+        mask.i_mut((8isize..16, 0isize..8))?
+            .add_assign(&kernel.mul(&f32_0_5)?)?;
+
+        mask.save_image("/tmp/test_conv_tile_matcher_mask.png")?;
+        kernel.save_image("/tmp/test_conv_tile_matcher_kernel.png")?;
+        let mask = mask.unsqueeze(0)?.unsqueeze(0)?;
+        let kernel = kernel.unsqueeze(0)?.unsqueeze(0)?;
+
+        let r = conv_mask_with_distinguishing_kernel(&mask.ten()?, &kernel.ten()?)?;
+        println!("r: {r:?}");
+        let highest = r.highest();
+        assert!(highest.is_some());
+        let highest = highest.unwrap();
+        assert_eq!(highest.position.x, 8);
+        assert_eq!(highest.position.y, 8);
+
+        Ok(())
+    }
+}
