@@ -4,6 +4,7 @@ use flash_powder::prelude::*;
 use flash_powder::{StableTorchResult, Ten, Tensor};
 use serde::{Deserialize, Serialize};
 
+use crate::accumulator::grid::GridWindow;
 use crate::accumulator::grid::Position;
 
 /// Create a distinguishing kernel
@@ -127,11 +128,13 @@ impl ScoredConv {
 pub fn conv_mask_with_distinguishing_kernel(
     mask: &Ten<'_>,
     kernel: &Ten<'_>,
+    roi: Option<GridWindow>,
 ) -> StableTorchResult<ScoredConv> {
     let options = nn::functional::Conv2dOptions {
         padding: (0, 0),
         ..Default::default()
     };
+
     let conv2 = nn::functional::conv2d(mask, kernel, None, &options)?;
     let conv2 = conv2.to(&fp::DType::F32.into())?;
 
@@ -168,12 +171,13 @@ mod test {
         let kernel = circle_image(8, 8, 4, 4, 4)?;
         // Lets make an image, with two circles, one at the top right that has a 1.0 kernel, and one at the bottom
         // left with 0.5 kernel.
-        let mut mask = Tensor::zeros(&[16, 16], &Default::default())?;
+        let mut mask = Tensor::zeros(&[32, 32], &Default::default())?;
+        *mask.f32_mut(&[0, 0])? = 1.0;
 
-        mask.i_mut((0isize..8, 8isize..16))?.add_assign(&kernel)?;
+        mask.i_mut((8isize..16, 16isize..24))?.add_assign(&kernel)?;
 
         let f32_0_5: Tensor = 0.5.try_into()?;
-        mask.i_mut((8isize..16, 0isize..8))?
+        mask.i_mut((24isize..32, 4isize..12))?
             .add_assign(&kernel.mul(&f32_0_5)?)?;
 
         // Write to disk for inspection.
@@ -185,14 +189,24 @@ mod test {
         let kernel = kernel.unsqueeze(0)?.unsqueeze(0)?;
 
         // Calculate the convolution and best fit for each.
-        let r = conv_mask_with_distinguishing_kernel(&mask.ten()?, &kernel.ten()?)?;
+        let r = conv_mask_with_distinguishing_kernel(&mask.ten()?, &kernel.ten()?, None)?;
         let highest = r.highest();
         assert!(highest.is_some());
         let highest = highest.unwrap();
-        assert_eq!(highest.position.x, 8);
-        assert_eq!(highest.position.y, 0);
+        assert_eq!(highest.position.x, 16);
+        assert_eq!(highest.position.y, 8);
         assert_eq!(highest.score, 47.0);
         assert_eq!(highest.index, 0);
+
+        // Next, search in the bottom left window for the weaker signal...
+        let roi = GridWindow::rect_at((24, 32).into(), (0, 8).into());
+        let r = conv_mask_with_distinguishing_kernel(&mask.ten()?, &kernel.ten()?, Some(roi))?;
+        println!("r: {r:#?}");
+        let highest = r.highest();
+        assert!(highest.is_some());
+        let highest = highest.unwrap();
+        assert_eq!(highest.position.x, 4);
+        assert_eq!(highest.position.y, 24);
 
         Ok(())
     }

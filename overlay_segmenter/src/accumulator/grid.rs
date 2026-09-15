@@ -98,8 +98,13 @@ pub struct GridId(usize);
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub struct GridWindow {
-    size: Rect,
-    position: Position,
+    pub size: Rect,
+    pub position: Position,
+}
+impl GridWindow {
+    pub fn rect_at(size: Rect, position: Position) -> Self {
+        GridWindow { size, position }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
