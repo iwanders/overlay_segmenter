@@ -135,7 +135,22 @@ pub fn conv_mask_with_distinguishing_kernel(
         ..Default::default()
     };
 
-    let conv2 = nn::functional::conv2d(mask, kernel, None, &options)?;
+    let (yo, xo, mask) = if let Some(roi) = roi {
+        (
+            roi.position.y,
+            roi.position.x,
+            mask.i((
+                ..,
+                ..,
+                (roi.position.y as isize)..(roi.position.y + roi.size.h as isize),
+                (roi.position.x as isize)..(roi.position.x + roi.size.w as isize),
+            ))?,
+        )
+    } else {
+        (0, 0, mask.ten()?)
+    };
+
+    let conv2 = nn::functional::conv2d(&mask, kernel, None, &options)?;
     let conv2 = conv2.to(&fp::DType::F32.into())?;
 
     let mut scores = vec![];
@@ -145,7 +160,10 @@ pub fn conv_mask_with_distinguishing_kernel(
 
         scores.push(TileScore {
             index: candidate_slice,
-            position: Position { x: dx, y: dy },
+            position: Position {
+                x: dx + xo,
+                y: dy + yo,
+            },
             score: this_score,
         });
     }
@@ -199,7 +217,7 @@ mod test {
         assert_eq!(highest.index, 0);
 
         // Next, search in the bottom left window for the weaker signal...
-        let roi = GridWindow::rect_at((24, 32).into(), (0, 8).into());
+        let roi = GridWindow::rect_at((16, 24).into(), (0, 8).into());
         let r = conv_mask_with_distinguishing_kernel(&mask.ten()?, &kernel.ten()?, Some(roi))?;
         println!("r: {r:#?}");
         let highest = r.highest();
@@ -207,6 +225,8 @@ mod test {
         let highest = highest.unwrap();
         assert_eq!(highest.position.x, 4);
         assert_eq!(highest.position.y, 24);
+        assert_eq!(highest.score, 47.0 * 0.5);
+        assert_eq!(highest.index, 0);
 
         Ok(())
     }
