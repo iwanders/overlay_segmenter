@@ -228,6 +228,19 @@ mod test {
         assert_eq!(highest.score, 47.0 * 0.5);
         assert_eq!(highest.index, 0);
 
+        // WHat is we have an ROI that is smaller than the actual image... we need to grow the view into the mask then
+        // because having an ROI that's smaller than the kernel is very well possible if we already have a precise estimate.
+        let roi = GridWindow::rect_at((4, 4).into(), (2, 22).into());
+        let r = conv_mask_with_distinguishing_kernel(&mask.ten()?, &kernel.ten()?, Some(roi))?;
+        println!("r: {r:#?}");
+        let highest = r.highest();
+        assert!(highest.is_some());
+        let highest = highest.unwrap();
+        assert_eq!(highest.position.x, 4);
+        assert_eq!(highest.position.y, 24);
+        assert_eq!(highest.score, 47.0 * 0.5);
+        assert_eq!(highest.index, 0);
+
         Ok(())
     }
 }
