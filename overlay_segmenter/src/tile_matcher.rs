@@ -125,6 +125,12 @@ impl ScoredConv {
     }
 }
 
+/// Convolute a mask with a distinguishing kernel.
+///
+/// Mask: The 'n' channel mask from segmentation.
+/// Kernel; The 't' x 'n' x h x w, dinstinguishing kernel with 't' tiles and 'n' channels.
+/// Roi; The region of interest (for the top left corner) of the mask. It will _NOT_ position the kernel anywhere outside
+///      of the mask.
 pub fn conv_mask_with_distinguishing_kernel(
     mask: &Ten<'_>,
     kernel: &Ten<'_>,
@@ -135,20 +141,40 @@ pub fn conv_mask_with_distinguishing_kernel(
         ..Default::default()
     };
 
+    let mask_w = mask.isize(-1) as isize;
+    let mask_h = mask.isize(-2) as isize;
+    let kernel_w = kernel.isize(-1) as isize;
+    let kernel_h = kernel.isize(-2) as isize;
     let (yo, xo, mask) = if let Some(roi) = roi {
+        println!(" start {:?}", (roi.position.y as isize));
+        println!(
+            " up to  {:?}, clamped {:?}",
+            (roi.position.y + roi.size.h as isize + kernel_h as isize),
+            (roi.position.y + roi.size.h as isize + kernel_h as isize).min(mask_h - roi.position.y)
+        );
         (
             roi.position.y,
             roi.position.x,
             mask.i((
                 ..,
                 ..,
-                (roi.position.y as isize)..(roi.position.y + roi.size.h as isize),
-                (roi.position.x as isize)..(roi.position.x + roi.size.w as isize),
+                (roi.position.y as isize)
+                    ..(roi.position.y
+                        + (roi.size.h as isize + kernel_h as isize).min(mask_h - roi.position.y)),
+                (roi.position.x as isize)
+                    ..(roi.position.x
+                        + (roi.size.w as isize + kernel_w as isize).min(mask_w - roi.position.x)),
             ))?,
         )
     } else {
         (0, 0, mask.ten()?)
     };
+    println!("mask size: {:?}", mask.shape());
+    if false {
+        use flash_powder_image::TensorToImage;
+
+        mask.save_image("/tmp/test_conv_tile_matcher_kernel_maskthing.png")?;
+    }
 
     let conv2 = nn::functional::conv2d(&mask, kernel, None, &options)?;
     let conv2 = conv2.to(&fp::DType::F32.into())?;
@@ -206,6 +232,7 @@ mod test {
         let mask = mask.unsqueeze(0)?.unsqueeze(0)?;
         let kernel = kernel.unsqueeze(0)?.unsqueeze(0)?;
 
+        dbg!();
         // Calculate the convolution and best fit for each.
         let r = conv_mask_with_distinguishing_kernel(&mask.ten()?, &kernel.ten()?, None)?;
         let highest = r.highest();
@@ -215,9 +242,10 @@ mod test {
         assert_eq!(highest.position.y, 8);
         assert_eq!(highest.score, 47.0);
         assert_eq!(highest.index, 0);
+        dbg!();
 
         // Next, search in the bottom left window for the weaker signal...
-        let roi = GridWindow::rect_at((16, 24).into(), (0, 8).into());
+        let roi = GridWindow::rect_at((16, 16).into(), (0, 16).into());
         let r = conv_mask_with_distinguishing_kernel(&mask.ten()?, &kernel.ten()?, Some(roi))?;
         println!("r: {r:#?}");
         let highest = r.highest();
@@ -228,6 +256,7 @@ mod test {
         assert_eq!(highest.score, 47.0 * 0.5);
         assert_eq!(highest.index, 0);
 
+        dbg!();
         // WHat is we have an ROI that is smaller than the actual image... we need to grow the view into the mask then
         // because having an ROI that's smaller than the kernel is very well possible if we already have a precise estimate.
         let roi = GridWindow::rect_at((4, 4).into(), (2, 22).into());
