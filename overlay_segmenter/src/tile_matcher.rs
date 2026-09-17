@@ -141,17 +141,18 @@ pub fn conv_mask_with_distinguishing_kernel(
         ..Default::default()
     };
 
+    if mask.dim() != 4 {
+        anyhow::bail!("mask is not 4 dimensional, expecting b (1) x c x h x w")
+    }
+    if kernel.dim() != 4 {
+        anyhow::bail!("kernel is not 4 dimensional, expecting t (1+) x c x h x w")
+    }
+
     let mask_w = mask.isize(-1) as isize;
     let mask_h = mask.isize(-2) as isize;
     let kernel_w = kernel.isize(-1) as isize;
     let kernel_h = kernel.isize(-2) as isize;
     let (yo, xo, mask) = if let Some(roi) = roi {
-        println!(" start {:?}", (roi.position.y as isize));
-        println!(
-            " up to  {:?}, clamped {:?}",
-            (roi.position.y + roi.size.h as isize + kernel_h as isize),
-            (roi.position.y + roi.size.h as isize + kernel_h as isize).min(mask_h - roi.position.y)
-        );
         (
             roi.position.y,
             roi.position.x,
@@ -169,7 +170,6 @@ pub fn conv_mask_with_distinguishing_kernel(
     } else {
         (0, 0, mask.ten()?)
     };
-    println!("mask size: {:?}", mask.shape());
     if false {
         use flash_powder_image::TensorToImage;
 
