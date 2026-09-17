@@ -180,8 +180,8 @@ pub fn conv_mask_with_distinguishing_kernel(
     let conv2 = conv2.to(&fp::DType::F32.into())?;
 
     let mut scores = vec![];
-    for candidate_slice in 0..conv2.size(0) {
-        let this_slice = conv2.i((candidate_slice as isize, .., ..))?;
+    for candidate_slice in 0..conv2.size(1) {
+        let this_slice = conv2.i((0, candidate_slice as isize, .., ..))?;
         let (this_score, dx, dy) = conv_peak(&this_slice)?;
 
         scores.push(TileScore {
