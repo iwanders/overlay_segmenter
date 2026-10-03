@@ -48,7 +48,7 @@ pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
     }
 }
 
-pub fn generate_color_palette(class_count: usize) -> Result<Tensor, anyhow::Error> {
+pub fn generate_rgb_palette(class_count: usize) -> Vec<[f32; 3]> {
     let mut colors = vec![[0.0, 0.0, 0.0]];
     let class_count = class_count - 1; // -1 because black was already added
     for i in 0..class_count {
@@ -61,7 +61,11 @@ pub fn generate_color_palette(class_count: usize) -> Result<Tensor, anyhow::Erro
 
         colors.push(hsv_to_rgb(hue, saturation, value).into());
     }
-    Tensor::from(&colors[..])
+    colors
+}
+
+pub fn generate_color_palette(class_count: usize) -> Result<Tensor, anyhow::Error> {
+    Tensor::from(&generate_rgb_palette(class_count)[..])
 }
 
 pub fn apply_pallette(
